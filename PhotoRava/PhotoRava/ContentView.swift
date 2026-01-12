@@ -1,24 +1,19 @@
 //
-//  ContentView.swift
+//  PhotoRavaApp.swift
 //  PhotoRava
 //
 //  Created by 정종원 on 1/12/26.
 //
 
 import SwiftUI
+import SwiftData
 
-struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+@main
+struct PhotoRavaApp: App {
+    var body: some Scene {
+        WindowGroup {
+            RouteListView()
         }
-        .padding()
+        .modelContainer(for: [Route.self, PhotoRecord.self])
     }
-}
-
-#Preview {
-    ContentView()
 }

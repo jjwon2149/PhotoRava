@@ -1,17 +1,19 @@
+////
+////  PhotoRavaApp.swift
+////  PhotoRava
+////
+////  Created by 정종원 on 1/12/26.
+////
 //
-//  PhotoRavaApp.swift
-//  PhotoRava
+//import SwiftUI
+//import SwiftData
 //
-//  Created by 정종원 on 1/12/26.
-//
-
-import SwiftUI
-
-@main
-struct PhotoRavaApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
-}
+//@main
+//struct PhotoRavaApp: App {
+//    var body: some Scene {
+//        WindowGroup {
+//            RouteListView()
+//        }
+//        .modelContainer(for: [Route.self, PhotoRecord.self])
+//    }
+//}
