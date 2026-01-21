@@ -14,6 +14,7 @@ struct RouteEditView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var editMode: EditMode = .inactive
     @State private var showingDeleteAlert = false
+    @State private var isRecalculating = false
     
     var body: some View {
         NavigationStack {
@@ -71,8 +72,14 @@ struct RouteEditView: View {
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("완료") {
-                        saveChanges()
+                    if isRecalculating {
+                        ProgressView()
+                    } else {
+                        Button("완료") {
+                            Task {
+                                await saveChanges()
+                            }
+                        }
                     }
                 }
                 
@@ -100,8 +107,16 @@ struct RouteEditView: View {
         route.photoRecords.move(fromOffsets: source, toOffset: destination)
     }
     
-    private func saveChanges() {
+    private func saveChanges() async {
+        isRecalculating = true
+        
+        // 파생 데이터 재계산 (좌표, 거리, 시간, 도로명 목록)
+        await RouteReconstructionService.shared.recalculateRouteData(for: route)
+        
+        // SwiftData에 저장
         try? modelContext.save()
+        
+        isRecalculating = false
         dismiss()
     }
     
@@ -111,4 +126,5 @@ struct RouteEditView: View {
         dismiss()
     }
 }
+
 

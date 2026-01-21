@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import Photos
 
 struct PhotoSelectionView: View {
     @Environment(\.dismiss) private var dismiss
@@ -196,15 +197,57 @@ class PhotoPickerViewModel: ObservableObject {
         var newPhotos: [LoadedPhoto] = []
         
         for item in selectedItems {
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let image = UIImage(data: data) {
-                let photo = LoadedPhoto(image: image, asset: nil)
+            // 1. PHAsset 가져오기 (itemIdentifier 사용)
+            var phAsset: PHAsset?
+            if let identifier = item.itemIdentifier {
+                let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+                phAsset = fetchResult.firstObject
+            }
+            
+            // 2. 이미지 로드 (표시용 - 썸네일 크기)
+            var image: UIImage?
+            if let asset = phAsset {
+                // PHAsset에서 직접 이미지 가져오기 (빠른 로딩)
+                image = await fetchThumbnailImage(for: asset, targetSize: CGSize(width: 300, height: 300))
+            } else {
+                // PHAsset을 못 가져온 경우 fallback
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    image = UIImage(data: data)
+                }
+            }
+            
+            if let image = image {
+                let photo = LoadedPhoto(
+                    image: image,
+                    asset: phAsset,
+                    itemIdentifier: item.itemIdentifier
+                )
                 newPhotos.append(photo)
                 selectedPhotoIDs.insert(photo.id)
             }
         }
         
         loadedPhotos = newPhotos
+    }
+    
+    // PHAsset에서 썸네일 이미지 가져오기
+    private func fetchThumbnailImage(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .fastFormat
+            options.resizeMode = .fast
+            options.isSynchronous = false
+            options.isNetworkAccessAllowed = true
+            
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                options: options
+            ) { image, _ in
+                continuation.resume(returning: image)
+            }
+        }
     }
     
     func isSelected(_ photo: LoadedPhoto) -> Bool {
@@ -232,5 +275,12 @@ struct LoadedPhoto: Identifiable {
     let id = UUID()
     var image: UIImage
     var asset: PHAsset?
+    var itemIdentifier: String?
+    
+    init(image: UIImage, asset: PHAsset?, itemIdentifier: String? = nil) {
+        self.image = image
+        self.asset = asset
+        self.itemIdentifier = itemIdentifier
+    }
 }
 

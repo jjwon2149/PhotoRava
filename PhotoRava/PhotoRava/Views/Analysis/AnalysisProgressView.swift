@@ -7,6 +7,8 @@
 
 import SwiftUI
 import SwiftData
+import ImageIO
+import CoreGraphics
 
 struct AnalysisProgressView: View {
     let photos: [LoadedPhoto]
@@ -282,7 +284,30 @@ class AnalysisViewModel: ObservableObject {
             
             // PhotoRecord 생성
             let record = PhotoRecord(capturedAt: metadata.capturedAt)
-            record.imageData = photo.image.jpegData(compressionQuality: 0.7)
+            
+            // 이미지 데이터 저장 - PHAsset이 있으면 원본 데이터 사용, 없으면 압축
+            if let asset = photo.asset {
+                // 원본 이미지 데이터 가져오기 (메타데이터 보존)
+                if let originalData = await metadataService.fetchOriginalImageData(for: asset) {
+                    // 원본 데이터가 너무 크면 적절히 압축 (하지만 메타데이터는 보존)
+                    if originalData.count > 5_000_000 { // 5MB 이상이면
+                        // 메타데이터를 보존하면서 압축
+                        record.imageData = await compressImageWithMetadataPreservation(
+                            originalData: originalData,
+                            maxSize: 2_000_000 // 2MB로 제한
+                        )
+                    } else {
+                        record.imageData = originalData
+                    }
+                } else {
+                    // 원본을 못 가져오면 fallback
+                    record.imageData = photo.image.jpegData(compressionQuality: 0.8)
+                }
+            } else {
+                // PHAsset이 없으면 압축 저장
+                record.imageData = photo.image.jpegData(compressionQuality: 0.8)
+            }
+            
             record.roadName = roadName
             record.ocrConfidence = confidence
             record.latitude = metadata.coordinate?.latitude
@@ -321,6 +346,57 @@ class AnalysisViewModel: ObservableObject {
     
     func cancelAnalysis() {
         isCancelled = true
+    }
+    
+    // 메타데이터를 보존하면서 이미지 압축
+    private func compressImageWithMetadataPreservation(originalData: Data, maxSize: Int) async -> Data? {
+        guard let source = CGImageSourceCreateWithData(originalData as CFData, nil),
+              let imageType = CGImageSourceGetType(source),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+        
+        // 원본 메타데이터 가져오기
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else {
+            return nil
+        }
+        
+        // 압축 옵션 설정
+        var compressionQuality: CGFloat = 0.8
+        var compressedData: Data?
+        
+        // 목표 크기에 맞춰 품질 조정
+        for _ in 0..<5 {
+            let mutableData = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(
+                mutableData as CFMutableData,
+                imageType,
+                1,
+                nil
+            ) else {
+                break
+            }
+            
+            // 메타데이터와 함께 이미지 추가 (올바른 방법)
+            var options = properties as [String: Any]
+            options[kCGImageDestinationLossyCompressionQuality as String] = compressionQuality
+            
+            CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+            
+            guard CGImageDestinationFinalize(destination) else {
+                break
+            }
+            
+            compressedData = mutableData as Data
+            
+            if let data = compressedData, data.count <= maxSize {
+                break
+            }
+            
+            compressionQuality -= 0.1
+        }
+        
+        return compressedData ?? originalData
     }
 }
 

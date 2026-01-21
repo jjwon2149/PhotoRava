@@ -31,3 +31,4 @@ struct StoredCoordinate: Codable {
     var longitude: Double
 }
 
+
