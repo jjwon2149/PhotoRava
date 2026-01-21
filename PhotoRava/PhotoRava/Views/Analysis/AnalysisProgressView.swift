@@ -243,22 +243,28 @@ class AnalysisViewModel: ObservableObject {
         var photoRecords: [PhotoRecord] = []
         
         // Step 1: 메타데이터 추출 및 시간순 정렬
-        currentStep = "사진 정렬 중..."
+        currentStep = "GPS/메타데이터 수집 중..."
         
         var photosWithMetadata: [(photo: LoadedPhoto, metadata: PhotoMetadata)] = []
         
-        for photo in photos {
+        for (index, photo) in photos.enumerated() {
             guard !isCancelled else { break }
             
             let metadata = await metadataService.extractMetadata(from: photo.image, asset: photo.asset)
             photosWithMetadata.append((photo, metadata))
+            
+            processedCount = index + 1
+            progress = Double(processedCount) / Double(max(totalCount, 1)) * 0.3
         }
         
         // 촬영 시간순 정렬
         photosWithMetadata.sort { $0.metadata.capturedAt < $1.metadata.capturedAt }
         
-        // Step 2: OCR 실행
-        currentStep = "도로명 인식 중..."
+        // Step 2: OCR 실행 (GPS 없는 사진에만)
+        let needsOCRCount = photosWithMetadata.filter { $0.metadata.coordinate == nil }.count
+        if needsOCRCount > 0 {
+            currentStep = "도로명 인식 중..."
+        }
         
         for (index, item) in photosWithMetadata.enumerated() {
             guard !isCancelled else { break }
@@ -266,20 +272,22 @@ class AnalysisViewModel: ObservableObject {
             let photo = item.photo
             let metadata = item.metadata
             
-            // OCR 실행
+            // OCR 실행 (GPS 없는 경우에만)
             var roadName: String?
             var confidence: Float = 0
             
-            do {
-                let recognizedTexts = try await ocrService.recognizeText(in: photo.image)
-                
-                // 가장 신뢰도 높은 도로명 선택
-                if let best = recognizedTexts.max(by: { $0.confidence < $1.confidence }) {
-                    roadName = best.text
-                    confidence = best.confidence
+            if metadata.coordinate == nil {
+                do {
+                    let recognizedTexts = try await ocrService.recognizeText(in: photo.image)
+                    
+                    // 가장 신뢰도 높은 도로명 선택
+                    if let best = recognizedTexts.max(by: { $0.confidence < $1.confidence }) {
+                        roadName = best.text
+                        confidence = best.confidence
+                    }
+                } catch {
+                    print("OCR failed for photo \(index): \(error)")
                 }
-            } catch {
-                print("OCR failed for photo \(index): \(error)")
             }
             
             // PhotoRecord 생성
@@ -317,7 +325,8 @@ class AnalysisViewModel: ObservableObject {
             
             // 진행률 업데이트
             processedCount = index + 1
-            progress = Double(processedCount) / Double(totalCount)
+            let base = Double(processedCount) / Double(max(totalCount, 1))
+            progress = 0.3 + base * 0.6
             
             // UI 업데이트를 위한 짧은 딜레이
             try? await Task.sleep(for: .milliseconds(100))
@@ -327,6 +336,7 @@ class AnalysisViewModel: ObservableObject {
         
         // Step 3: 경로 재구성
         currentStep = "경로 생성 중..."
+        progress = 0.95
         
         do {
             let route = try await RouteReconstructionService.shared.reconstructRoute(from: photoRecords)
@@ -338,6 +348,7 @@ class AnalysisViewModel: ObservableObject {
             }
             
             completedRoute = route
+            progress = 1.0
         } catch {
             errorMessage = "경로 생성에 실패했습니다: \(error.localizedDescription)"
             showingError = true
@@ -399,4 +410,3 @@ class AnalysisViewModel: ObservableObject {
         return compressedData ?? originalData
     }
 }
-

@@ -22,38 +22,21 @@ class RouteReconstructionService {
         route.photoRecords.removeAll()
         route.photoRecords.append(contentsOf: sortedRecords)
         
-        // 도로명이 있는 레코드만 필터링
-        let recordsWithRoadNames = sortedRecords.filter { $0.roadName != nil && !$0.roadName!.isEmpty }
-        
         // 좌표 수집
         var coordinates: [StoredCoordinate] = []
-        var roadPoints: [RoadPoint] = []
         var geocodingFailures: [String] = []
         
-        for record in recordsWithRoadNames {
+        for record in sortedRecords {
             // GPS 좌표가 있으면 사용
             if let lat = record.latitude, let lon = record.longitude {
                 let coord = StoredCoordinate(latitude: lat, longitude: lon)
                 coordinates.append(coord)
-                
-                if let roadName = record.roadName {
-                    roadPoints.append(RoadPoint(
-                        roadName: roadName,
-                        coordinate: coord,
-                        timestamp: record.capturedAt
-                    ))
-                }
             }
             // GPS가 없으면 도로명으로 지오코딩 시도
-            else if let roadName = record.roadName {
+            else if let roadName = record.roadName, !roadName.isEmpty {
                 do {
                     if let geocoded = try await geocodeUsingAppleMaps(roadName: roadName) {
                         coordinates.append(geocoded)
-                        roadPoints.append(RoadPoint(
-                            roadName: roadName,
-                            coordinate: geocoded,
-                            timestamp: record.capturedAt
-                        ))
                         
                         // 역지오코딩한 좌표를 레코드에 저장
                         record.latitude = geocoded.latitude
@@ -85,10 +68,15 @@ class RouteReconstructionService {
         
         // 통계 계산
         route.totalDistance = calculateDistance(coordinates)
-        route.duration = calculateDuration(roadPoints)
+        route.duration = calculateDuration(from: sortedRecords)
         
-        // 중복 제거한 도로명 리스트
-        route.roadNames = Array(Set(roadPoints.map { $0.roadName })).sorted()
+        // 중복 제거한 도로명 리스트 (좌표 유무와 무관하게 저장)
+        route.roadNames = Array(
+            Set(sortedRecords.compactMap { record in
+                guard let name = record.roadName, !name.isEmpty else { return nil }
+                return name
+            })
+        ).sorted()
     }
     
     func reconstructRoute(from photoRecords: [PhotoRecord]) async throws -> Route {
@@ -99,44 +87,31 @@ class RouteReconstructionService {
         // 1. 시간순 정렬 (이미 정렬되어 있어야 함)
         let sortedRecords = photoRecords.sorted { $0.capturedAt < $1.capturedAt }
         
-        // 2. 도로명이 있는 레코드만 필터링
-        let recordsWithRoadNames = sortedRecords.filter { $0.roadName != nil && !$0.roadName!.isEmpty }
-        
-        guard !recordsWithRoadNames.isEmpty else {
-            throw RouteError.noRoadNamesFound
-        }
-        
-        // 3. 좌표 수집
+        // 2. 좌표 수집 (GPS-first, 필요 시 roadName 지오코딩 보완)
         var coordinates: [StoredCoordinate] = []
-        var roadPoints: [RoadPoint] = []
+        var geocodingFailures: [String] = []
         
-        for record in recordsWithRoadNames {
+        for record in sortedRecords {
             // GPS 좌표가 있으면 사용
             if let lat = record.latitude, let lon = record.longitude {
                 let coord = StoredCoordinate(latitude: lat, longitude: lon)
                 coordinates.append(coord)
-                
-                if let roadName = record.roadName {
-                    roadPoints.append(RoadPoint(
-                        roadName: roadName,
-                        coordinate: coord,
-                        timestamp: record.capturedAt
-                    ))
-                }
             }
             // GPS가 없으면 도로명으로 지오코딩 시도
-            else if let roadName = record.roadName {
-                if let geocoded = try? await geocodeUsingAppleMaps(roadName: roadName) {
-                    coordinates.append(geocoded)
-                    roadPoints.append(RoadPoint(
-                        roadName: roadName,
-                        coordinate: geocoded,
-                        timestamp: record.capturedAt
-                    ))
-                    
-                    // 역지오코딩한 좌표를 레코드에 저장
-                    record.latitude = geocoded.latitude
-                    record.longitude = geocoded.longitude
+            else if let roadName = record.roadName, !roadName.isEmpty {
+                do {
+                    if let geocoded = try await geocodeUsingAppleMaps(roadName: roadName) {
+                        coordinates.append(geocoded)
+                        
+                        // 지오코딩한 좌표를 레코드에 저장
+                        record.latitude = geocoded.latitude
+                        record.longitude = geocoded.longitude
+                    } else {
+                        geocodingFailures.append(roadName)
+                    }
+                } catch {
+                    geocodingFailures.append(roadName)
+                    print("Geocoding failed for \(roadName): \(error.localizedDescription)")
                 }
             }
         }
@@ -145,10 +120,16 @@ class RouteReconstructionService {
             throw RouteError.noCoordinatesFound
         }
         
-        // 4. 경로 생성
+        // 3. 경로 생성
+        let routeDate = sortedRecords.first?.capturedAt ?? Date()
+        let routeName = generateRouteName(
+            baseDate: routeDate,
+            firstRoadName: sortedRecords.compactMap { $0.roadName }.first(where: { !$0.isEmpty })
+        )
+        
         let route = Route(
-            name: generateRouteName(from: roadPoints),
-            date: sortedRecords.first?.capturedAt ?? Date()
+            name: routeName,
+            date: routeDate
         )
         
         // 모든 PhotoRecord 추가 (도로명 없는 것도 포함)
@@ -161,10 +142,19 @@ class RouteReconstructionService {
         
         // 통계 계산
         route.totalDistance = calculateDistance(coordinates)
-        route.duration = calculateDuration(roadPoints)
+        route.duration = calculateDuration(from: sortedRecords)
         
-        // 중복 제거한 도로명 리스트
-        route.roadNames = Array(Set(roadPoints.map { $0.roadName })).sorted()
+        // 중복 제거한 도로명 리스트 (좌표 유무와 무관하게 저장)
+        route.roadNames = Array(
+            Set(sortedRecords.compactMap { record in
+                guard let name = record.roadName, !name.isEmpty else { return nil }
+                return name
+            })
+        ).sorted()
+        
+        if !geocodingFailures.isEmpty {
+            print("Warning: Failed to geocode \(geocodingFailures.count) road names: \(geocodingFailures.joined(separator: ", "))")
+        }
         
         return route
     }
@@ -214,29 +204,23 @@ class RouteReconstructionService {
         return totalDistance / 1000.0
     }
     
-    private func calculateDuration(_ points: [RoadPoint]) -> TimeInterval {
-        guard let first = points.first, let last = points.last else {
+    private func calculateDuration(from records: [PhotoRecord]) -> TimeInterval {
+        guard let first = records.first?.capturedAt, let last = records.last?.capturedAt else {
             return 0
         }
-        
-        return last.timestamp.timeIntervalSince(first.timestamp)
+        return last.timeIntervalSince(first)
     }
     
-    private func generateRouteName(from points: [RoadPoint]) -> String {
-        guard let first = points.first else {
-            return "새 경로"
-        }
-        
+    private func generateRouteName(baseDate: Date, firstRoadName: String?) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM월 dd일"
         formatter.locale = Locale(identifier: "ko_KR")
         
-        let dateString = formatter.string(from: first.timestamp)
+        let dateString = formatter.string(from: baseDate)
         
         // 첫 번째 도로명을 포함
-        if !points.isEmpty {
-            let firstRoad = points[0].roadName
-            return "\(dateString) \(firstRoad)"
+        if let firstRoadName, !firstRoadName.isEmpty {
+            return "\(dateString) \(firstRoadName)"
         }
         
         return "\(dateString) 경로"
@@ -265,5 +249,3 @@ enum RouteError: LocalizedError {
         }
     }
 }
-
-
