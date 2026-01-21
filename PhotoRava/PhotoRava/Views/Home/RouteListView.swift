@@ -13,34 +13,97 @@ struct RouteListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Route.date, order: .reverse) private var routes: [Route]
     @State private var showingPhotoSelection = false
-    @State private var selectedTab = 0
+    @State private var searchText = ""
+    
+    // 검색 필터링된 경로
+    var filteredRoutes: [Route] {
+        guard !searchText.isEmpty else { return routes }
+        
+        let searchLower = searchText.lowercased().trimmingCharacters(in: .whitespaces)
+        
+        return routes.filter { route in
+            // 경로 이름 검색
+            route.name.lowercased().contains(searchLower) ||
+            // 방문 도로명 검색
+            route.roadNames.contains { $0.lowercased().contains(searchLower) } ||
+            // 날짜 검색 (여러 포맷 지원)
+            matchesDate(route.date, searchText: searchLower)
+        }
+    }
     
     var body: some View {
         NavigationStack {
             Group {
-                if routes.isEmpty {
-                    emptyStateView
+                if filteredRoutes.isEmpty {
+                    if searchText.isEmpty {
+                        emptyStateView
+                    } else {
+                        searchEmptyStateView
+                    }
                 } else {
                     routeListView
                 }
             }
             .navigationTitle("내 경로")
+            .searchable(text: $searchText, prompt: "경로 이름, 도로명, 날짜로 검색")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        // Search action
+                        showingPhotoSelection = true
                     } label: {
-                        Image(systemName: "magnifyingglass")
+                        Image(systemName: "plus")
                     }
                 }
             }
             .sheet(isPresented: $showingPhotoSelection) {
                 PhotoSelectionView()
             }
-            .safeAreaInset(edge: .bottom) {
-                bottomBarContainer
+        }
+    }
+    
+    // 날짜 매칭 함수 (여러 포맷 지원)
+    private func matchesDate(_ date: Date, searchText: String) -> Bool {
+        let formatters: [DateFormatter] = [
+            {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy-MM-dd"
+                f.locale = Locale(identifier: "ko_KR")
+                return f
+            }(),
+            {
+                let f = DateFormatter()
+                f.dateFormat = "MM월 dd일"
+                f.locale = Locale(identifier: "ko_KR")
+                return f
+            }(),
+            {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy년 MM월 dd일"
+                f.locale = Locale(identifier: "ko_KR")
+                return f
+            }(),
+            {
+                let f = DateFormatter()
+                f.dateStyle = .medium
+                f.locale = Locale(identifier: "ko_KR")
+                return f
+            }(),
+            {
+                let f = DateFormatter()
+                f.dateStyle = .long
+                f.locale = Locale(identifier: "ko_KR")
+                return f
+            }()
+        ]
+        
+        for formatter in formatters {
+            let dateString = formatter.string(from: date).lowercased()
+            if dateString.contains(searchText) {
+                return true
             }
         }
+        
+        return false
     }
     
     private var emptyStateView: some View {
@@ -84,7 +147,7 @@ struct RouteListView: View {
     
     private var routeListView: some View {
         List {
-            ForEach(routes) { route in
+            ForEach(filteredRoutes) { route in
                 NavigationLink {
                     TimelineDetailView(route: route)
                 } label: {
@@ -98,54 +161,30 @@ struct RouteListView: View {
         .listStyle(.plain)
     }
     
-    private var bottomBarContainer: some View {
-        ZStack(alignment: .topTrailing) {
-            bottomTabBar
-                .padding(.top, 28)
+    private var searchEmptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 50))
+                .foregroundStyle(.secondary)
             
-            Button {
-                showingPhotoSelection = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
-                    .background(Color.primary)
-                    .clipShape(Circle())
-                    .shadow(color: .primary.opacity(0.3), radius: 8, y: 4)
-            }
-            .padding(.trailing, 24)
+            Text("검색 결과 없음")
+                .font(.title3)
+                .fontWeight(.semibold)
+            
+            Text("'\(searchText)'에 대한 결과를 찾을 수 없습니다")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
-    }
-    
-    private var bottomTabBar: some View {
-        HStack {
-            TabBarItem(icon: "house.fill", title: "Home", isSelected: selectedTab == 0) {
-                selectedTab = 0
-            }
-            
-            Spacer()
-            
-            TabBarItem(icon: "clock", title: "History", isSelected: selectedTab == 1) {
-                selectedTab = 1
-            }
-            
-            Spacer()
-            
-            TabBarItem(icon: "gearshape", title: "Settings", isSelected: selectedTab == 2) {
-                selectedTab = 2
-            }
-        }
-        .padding(.horizontal, 40)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
     
     private func deleteRoutes(at offsets: IndexSet) {
         for index in offsets {
-            modelContext.delete(routes[index])
+            modelContext.delete(filteredRoutes[index])
         }
+        try? modelContext.save()
     }
 }
 
@@ -260,25 +299,6 @@ struct RouteMapThumbnail: View {
     }
 }
 
-struct TabBarItem: View {
-    let icon: String
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.title3)
-                Text(title)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-            }
-            .foregroundStyle(isSelected ? .primary : .secondary)
-        }
-    }
-}
 
 // Preview용 더미 데이터
 extension Route {
