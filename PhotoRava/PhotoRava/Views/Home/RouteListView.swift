@@ -17,28 +17,12 @@ struct RouteListView: View {
     
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottomTrailing) {
+            Group {
                 if routes.isEmpty {
                     emptyStateView
                 } else {
                     routeListView
                 }
-                
-                // FAB Button
-                Button {
-                    showingPhotoSelection = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(Color.primary)
-                        .clipShape(Circle())
-                        .shadow(color: .primary.opacity(0.3), radius: 8, y: 4)
-                }
-                .padding(.trailing, 24)
-                .padding(.bottom, 90)
             }
             .navigationTitle("내 경로")
             .toolbar {
@@ -54,7 +38,7 @@ struct RouteListView: View {
                 PhotoSelectionView()
             }
             .safeAreaInset(edge: .bottom) {
-                bottomTabBar
+                bottomBarContainer
             }
         }
     }
@@ -95,6 +79,7 @@ struct RouteListView: View {
             }
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var routeListView: some View {
@@ -111,6 +96,27 @@ struct RouteListView: View {
             .onDelete(perform: deleteRoutes)
         }
         .listStyle(.plain)
+    }
+    
+    private var bottomBarContainer: some View {
+        ZStack(alignment: .topTrailing) {
+            bottomTabBar
+                .padding(.top, 28)
+            
+            Button {
+                showingPhotoSelection = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(Color.primary)
+                    .clipShape(Circle())
+                    .shadow(color: .primary.opacity(0.3), radius: 8, y: 4)
+            }
+            .padding(.trailing, 24)
+        }
     }
     
     private var bottomTabBar: some View {
@@ -290,4 +296,3 @@ extension Route {
         return [route1, route2]
     }
 }
-
