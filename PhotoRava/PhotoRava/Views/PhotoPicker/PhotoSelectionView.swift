@@ -196,21 +196,40 @@ class PhotoPickerViewModel: ObservableObject {
     func loadPhotos() async {
         var newPhotos: [LoadedPhoto] = []
         
+        // 사진 라이브러리 권한 확인
+        let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if authStatus != .authorized && authStatus != .limited {
+            print("Photo library access not authorized")
+            // 권한이 없어도 PhotosPickerItem에서 직접 로드 시도
+        }
+        
         for item in selectedItems {
-            // 1. PHAsset 가져오기 (itemIdentifier 사용)
+            // 1. PHAsset 가져오기 (itemIdentifier 사용) - 메타데이터 보존을 위해 필수
             var phAsset: PHAsset?
             if let identifier = item.itemIdentifier {
-                let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
-                phAsset = fetchResult.firstObject
+                do {
+                    let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+                    phAsset = fetchResult.firstObject
+                    
+                    if phAsset == nil {
+                        print("Warning: PHAsset not found for identifier: \(identifier)")
+                    }
+                } catch {
+                    print("Error fetching PHAsset: \(error)")
+                }
+            } else {
+                print("Warning: PhotosPickerItem.itemIdentifier is nil - metadata may be lost")
             }
             
             // 2. 이미지 로드 (표시용 - 썸네일 크기)
             var image: UIImage?
             if let asset = phAsset {
-                // PHAsset에서 직접 이미지 가져오기 (빠른 로딩)
+                // PHAsset에서 직접 이미지 가져오기 (빠른 로딩, 메타데이터 보존)
                 image = await fetchThumbnailImage(for: asset, targetSize: CGSize(width: 300, height: 300))
-            } else {
-                // PHAsset을 못 가져온 경우 fallback
+            }
+            
+            // PHAsset이 없거나 이미지 로드 실패 시 fallback
+            if image == nil {
                 if let data = try? await item.loadTransferable(type: Data.self) {
                     image = UIImage(data: data)
                 }
@@ -224,6 +243,8 @@ class PhotoPickerViewModel: ObservableObject {
                 )
                 newPhotos.append(photo)
                 selectedPhotoIDs.insert(photo.id)
+            } else {
+                print("Warning: Failed to load image for PhotosPickerItem")
             }
         }
         
@@ -283,4 +304,3 @@ struct LoadedPhoto: Identifiable {
         self.itemIdentifier = itemIdentifier
     }
 }
-

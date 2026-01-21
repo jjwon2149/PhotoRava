@@ -15,9 +15,12 @@ class RouteReconstructionService {
     
     /// 기존 Route의 파생 데이터를 재계산하여 업데이트
     func recalculateRouteData(for route: Route) async {
-        // 시간순 정렬
+        // 시간순 정렬 (SwiftData @Relationship 배열은 직접 수정)
         let sortedRecords = route.photoRecords.sorted { $0.capturedAt < $1.capturedAt }
-        route.photoRecords = sortedRecords
+        
+        // 배열 순서를 직접 수정 (SwiftData 호환)
+        route.photoRecords.removeAll()
+        route.photoRecords.append(contentsOf: sortedRecords)
         
         // 도로명이 있는 레코드만 필터링
         let recordsWithRoadNames = sortedRecords.filter { $0.roadName != nil && !$0.roadName!.isEmpty }
@@ -25,6 +28,7 @@ class RouteReconstructionService {
         // 좌표 수집
         var coordinates: [StoredCoordinate] = []
         var roadPoints: [RoadPoint] = []
+        var geocodingFailures: [String] = []
         
         for record in recordsWithRoadNames {
             // GPS 좌표가 있으면 사용
@@ -42,24 +46,41 @@ class RouteReconstructionService {
             }
             // GPS가 없으면 도로명으로 지오코딩 시도
             else if let roadName = record.roadName {
-                if let geocoded = try? await geocodeUsingAppleMaps(roadName: roadName) {
-                    coordinates.append(geocoded)
-                    roadPoints.append(RoadPoint(
-                        roadName: roadName,
-                        coordinate: geocoded,
-                        timestamp: record.capturedAt
-                    ))
-                    
-                    // 역지오코딩한 좌표를 레코드에 저장
-                    record.latitude = geocoded.latitude
-                    record.longitude = geocoded.longitude
+                do {
+                    if let geocoded = try await geocodeUsingAppleMaps(roadName: roadName) {
+                        coordinates.append(geocoded)
+                        roadPoints.append(RoadPoint(
+                            roadName: roadName,
+                            coordinate: geocoded,
+                            timestamp: record.capturedAt
+                        ))
+                        
+                        // 역지오코딩한 좌표를 레코드에 저장
+                        record.latitude = geocoded.latitude
+                        record.longitude = geocoded.longitude
+                    } else {
+                        geocodingFailures.append(roadName)
+                    }
+                } catch {
+                    geocodingFailures.append(roadName)
+                    print("Geocoding failed for \(roadName): \(error.localizedDescription)")
                 }
             }
         }
         
+        // 지오코딩 실패한 도로명이 있으면 로그 출력 (크래시 방지)
+        if !geocodingFailures.isEmpty {
+            print("Warning: Failed to geocode \(geocodingFailures.count) road names: \(geocodingFailures.joined(separator: ", "))")
+        }
+        
         // 좌표 데이터 저장
-        if let coordinatesData = try? JSONEncoder().encode(coordinates) {
-            route.coordinatesData = coordinatesData
+        do {
+            if let coordinatesData = try? JSONEncoder().encode(coordinates) {
+                route.coordinatesData = coordinatesData
+            }
+        } catch {
+            print("Error encoding coordinates: \(error.localizedDescription)")
+            // 좌표 인코딩 실패해도 계속 진행
         }
         
         // 통계 계산
