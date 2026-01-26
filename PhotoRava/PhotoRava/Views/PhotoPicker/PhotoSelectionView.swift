@@ -38,27 +38,25 @@ struct PhotoSelectionView: View {
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
+                    PhotosPicker(
+                        selection: $viewModel.selectedItems,
+                        maxSelectionCount: 50,
+                        matching: .images
+                    ) {
+                        Image(systemName: "photo.badge.plus")
+                    }
+                }
+                
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("전체") {
                         viewModel.selectAll()
                     }
-                }
-            }
-            .sheet(isPresented: $viewModel.showingPicker) {
-                PhotosPicker(
-                    selection: $viewModel.selectedItems,
-                    maxSelectionCount: 50,
-                    matching: .images
-                ) {
-                    Text("사진 선택")
                 }
             }
             .fullScreenCover(isPresented: $viewModel.showingAnalysis) {
                 if let photos = viewModel.selectedPhotosForAnalysis {
                     AnalysisProgressView(photos: photos)
                 }
-            }
-            .onAppear {
-                viewModel.showingPicker = true
             }
             .onChange(of: viewModel.selectedItems) { _, newItems in
                 Task {
@@ -78,9 +76,11 @@ struct PhotoSelectionView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
             
-            Button {
-                viewModel.showingPicker = true
-            } label: {
+            PhotosPicker(
+                selection: $viewModel.selectedItems,
+                maxSelectionCount: 50,
+                matching: .images
+            ) {
                 Text("사진 앨범 열기")
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -175,7 +175,6 @@ struct PhotoGridCell: View {
 class PhotoPickerViewModel: ObservableObject {
     @Published var selectedItems: [PhotosPickerItem] = []
     @Published var loadedPhotos: [LoadedPhoto] = []
-    @Published var showingPicker = false
     @Published var showingAnalysis = false
     
     private var selectedPhotoIDs: Set<UUID> = []
