@@ -12,7 +12,7 @@ import UIKit
 
 class PhotoMetadataService {
     /// 메타데이터 추출 (PHAsset 우선)
-    func extractMetadata(from image: UIImage, asset: PHAsset?) async -> PhotoMetadata {
+    func extractMetadata(from image: UIImage, asset: PHAsset?, originalData: Data? = nil) async -> PhotoMetadata {
         var metadata = PhotoMetadata()
         
         // 1. PHAsset에서 메타데이터 추출 (우선순위 1 - 가장 신뢰도 높음)
@@ -28,13 +28,13 @@ class PhotoMetadataService {
             }
             
             // 원본 이미지 데이터에서 EXIF 추출 (더 정확한 촬영 시간 등)
-            if let imageData = await fetchOriginalImageData(for: asset) {
+            if let imageData = await fetchOriginalImageData(for: asset) ?? originalData {
                 metadata = extractEXIFMetadata(from: imageData, metadata: metadata)
             }
         } else {
             // 2. 이미지 데이터에서 EXIF 추출 (우선순위 2 - PHAsset 없을 때)
             // 주의: UIImage에서 직접 만든 JPEG는 EXIF가 손실될 수 있음
-            if let imageData = image.jpegData(compressionQuality: 1.0) {
+            if let imageData = originalData ?? image.jpegData(compressionQuality: 1.0) {
                 metadata = extractEXIFMetadata(from: imageData, metadata: metadata)
             }
         }
@@ -131,5 +131,4 @@ struct PhotoMetadata {
         coordinate != nil
     }
 }
-
 

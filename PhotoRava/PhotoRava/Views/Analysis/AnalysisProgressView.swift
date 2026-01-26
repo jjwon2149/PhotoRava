@@ -250,7 +250,7 @@ class AnalysisViewModel: ObservableObject {
         for (index, photo) in photos.enumerated() {
             guard !isCancelled else { break }
             
-            let metadata = await metadataService.extractMetadata(from: photo.image, asset: photo.asset)
+            let metadata = await metadataService.extractMetadata(from: photo.image, asset: photo.asset, originalData: photo.originalData)
             photosWithMetadata.append((photo, metadata))
             
             processedCount = index + 1
@@ -313,7 +313,8 @@ class AnalysisViewModel: ObservableObject {
                 }
             } else {
                 // PHAsset이 없으면 압축 저장
-                record.imageData = photo.image.jpegData(compressionQuality: 0.8)
+                // 원본 데이터가 있으면 메타데이터 보존을 위해 우선 사용
+                record.imageData = photo.originalData ?? photo.image.jpegData(compressionQuality: 0.8)
             }
             
             record.roadName = roadName

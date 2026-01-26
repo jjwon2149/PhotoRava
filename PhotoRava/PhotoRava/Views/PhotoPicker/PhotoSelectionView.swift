@@ -222,6 +222,7 @@ class PhotoPickerViewModel: ObservableObject {
             
             // 2. 이미지 로드 (표시용 - 썸네일 크기)
             var image: UIImage?
+            var originalData: Data?
             if let asset = phAsset {
                 // PHAsset에서 직접 이미지 가져오기 (빠른 로딩, 메타데이터 보존)
                 image = await fetchThumbnailImage(for: asset, targetSize: CGSize(width: 300, height: 300))
@@ -231,6 +232,7 @@ class PhotoPickerViewModel: ObservableObject {
             if image == nil {
                 if let data = try? await item.loadTransferable(type: Data.self) {
                     image = UIImage(data: data)
+                    originalData = data
                 }
             }
             
@@ -238,7 +240,8 @@ class PhotoPickerViewModel: ObservableObject {
                 let photo = LoadedPhoto(
                     image: image,
                     asset: phAsset,
-                    itemIdentifier: item.itemIdentifier
+                    itemIdentifier: item.itemIdentifier,
+                    originalData: originalData
                 )
                 newPhotos.append(photo)
                 selectedPhotoIDs.insert(photo.id)
@@ -296,10 +299,13 @@ struct LoadedPhoto: Identifiable {
     var image: UIImage
     var asset: PHAsset?
     var itemIdentifier: String?
+    /// Original image data (when available). Keeps EXIF/GPS metadata.
+    var originalData: Data?
     
-    init(image: UIImage, asset: PHAsset?, itemIdentifier: String? = nil) {
+    init(image: UIImage, asset: PHAsset?, itemIdentifier: String? = nil, originalData: Data? = nil) {
         self.image = image
         self.asset = asset
         self.itemIdentifier = itemIdentifier
+        self.originalData = originalData
     }
 }
