@@ -26,9 +26,9 @@ struct MainTabView: View {
                     Label("Home", systemImage: "house.fill")
                 }
             
-            HistoryView()
+            ExifStampRootView()
                 .tabItem {
-                    Label("History", systemImage: "clock")
+                    Label("EXIF", systemImage: "text.below.photo")
                 }
             
             SettingsView()
