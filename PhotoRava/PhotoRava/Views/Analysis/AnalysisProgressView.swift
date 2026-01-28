@@ -271,7 +271,7 @@ class AnalysisViewModel: ObservableObject {
                     let recognizedTexts = try await ocrService.recognizeText(in: photo.image)
                     
                     // 가장 신뢰도 높은 도로명 선택
-                    if let best = recognizedTexts.max(by: { $0.confidence < $1.confidence }) {
+                    if let best = ocrService.bestRoadName(from: recognizedTexts) {
                         roadName = best.text
                         confidence = best.confidence
                     }
