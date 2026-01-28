@@ -6,12 +6,12 @@
 //
 
 import SwiftUI
-import SwiftData
+import Photos
+import UIKit
 
 struct RouteBottomSheet: View {
     @ObservedObject var viewModel: RouteMapViewModel
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
+    @State private var isExporting = false
     
     var body: some View {
         ScrollView {
@@ -87,7 +87,7 @@ struct RouteBottomSheet: View {
                 // Action buttons
                 HStack(spacing: 12) {
                     Button {
-                        shareRoute()
+                        Task { await shareRouteSnapshot() }
                     } label: {
                         Label("공유", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
@@ -95,15 +95,17 @@ struct RouteBottomSheet: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.primary)
+                    .disabled(isExporting)
                     
                     Button {
-                        saveRoute()
+                        Task { await saveRouteSnapshotToPhotos() }
                     } label: {
                         Label("저장", systemImage: "square.and.arrow.down")
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isExporting)
                 }
             }
             .padding()
@@ -121,42 +123,97 @@ struct RouteBottomSheet: View {
         }
     }
     
-    private func shareRoute() {
-        // 공유 기능
+    private func shareRouteTextFallback() {
         let text = """
         \(viewModel.route.name)
         거리: \(String(format: "%.1f", viewModel.route.totalDistance))km
         소요 시간: \(formatDuration(viewModel.route.duration))
         """
-        
-        let activityVC = UIActivityViewController(
-            activityItems: [text],
-            applicationActivities: nil
-        )
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let rootVC = windowScene.windows.first?.rootViewController {
-            rootVC.present(activityVC, animated: true)
-        }
+
+        let activityVC = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        present(activityVC)
     }
     
-    private func saveRoute() {
-        // 이미 저장되어 있는지 확인
+    private func makeSnapshotImage() async throws -> UIImage {
+        try await RouteSnapshotRenderer.renderSnapshot(
+            route: viewModel.route,
+            size: CGSize(width: 1600, height: 1600),
+            scale: UIScreen.main.scale,
+            lineWidth: 10
+        )
+    }
+
+    private func shareRouteSnapshot() async {
+        guard !isExporting else { return }
+        isExporting = true
+        defer { isExporting = false }
+
         do {
-            try modelContext.save()
-            
-            // 저장 완료 피드백
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
-            
-            // 홈으로 돌아가기
-            dismiss()
+            let image = try await makeSnapshotImage()
+            let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+            present(activityVC)
         } catch {
-            // 이미 저장되어 있거나 오류 발생
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
-            dismiss()
+            shareRouteTextFallback()
         }
+    }
+
+    private func saveRouteSnapshotToPhotos() async {
+        guard !isExporting else { return }
+        isExporting = true
+        defer { isExporting = false }
+
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if status == .notDetermined {
+            let newStatus = await requestPhotoAuthorization()
+            if newStatus != .authorized && newStatus != .limited {
+                return
+            }
+        } else if status != .authorized && status != .limited {
+            return
+        }
+
+        do {
+            let image = try await makeSnapshotImage()
+            try await saveToPhotoLibrary(image)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+
+    private func requestPhotoAuthorization() async -> PHAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
+    private func saveToPhotoLibrary(_ image: UIImage) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            } completionHandler: { success, error in
+                if success && error == nil {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: error ?? NSError(domain: "PhotoRava.RouteSave", code: 1))
+                }
+            }
+        }
+    }
+
+    private func present(_ controller: UIViewController) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+            return
+        }
+
+        var top = root
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        top.present(controller, animated: true)
     }
 }
 
@@ -241,4 +298,3 @@ struct FlowLayout: Layout {
         }
     }
 }
-
