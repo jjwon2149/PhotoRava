@@ -158,6 +158,11 @@ private struct ExifStampOptionsCard<Content: View>: View {
 
 private struct ExifStampLayoutTab: View {
     @ObservedObject var viewModel: ExifStampViewModel
+    @State private var tempTextScale: Double = 1.25
+    @State private var tempPaddingTop: Double = 0
+    @State private var tempPaddingBottom: Double = 0
+    @State private var tempPaddingLeft: Double = 0
+    @State private var tempPaddingRight: Double = 0
 
     var body: some View {
         ScrollView {
@@ -188,15 +193,15 @@ private struct ExifStampLayoutTab: View {
                     if viewModel.currentTheme.customizationSchema.allowsAdvancedPadding {
                         Toggle("고급 패딩", isOn: viewModel.advancedPaddingEnabledBinding)
 
-                        if viewModel.advancedPaddingEnabledBinding.wrappedValue {
-                            VStack(spacing: 10) {
-                                paddingSlider(label: "상", binding: viewModel.paddingTopBinding)
-                                paddingSlider(label: "하", binding: viewModel.paddingBottomBinding)
-                                paddingSlider(label: "좌", binding: viewModel.paddingLeftBinding)
-                                paddingSlider(label: "우", binding: viewModel.paddingRightBinding)
-                            }
-                            .padding(.top, 4)
+                    if viewModel.advancedPaddingEnabledBinding.wrappedValue {
+                        VStack(spacing: 10) {
+                            paddingSlider(label: "상", binding: $tempPaddingTop) { viewModel.paddingTopBinding.wrappedValue = $0 }
+                            paddingSlider(label: "하", binding: $tempPaddingBottom) { viewModel.paddingBottomBinding.wrappedValue = $0 }
+                            paddingSlider(label: "좌", binding: $tempPaddingLeft) { viewModel.paddingLeftBinding.wrappedValue = $0 }
+                            paddingSlider(label: "우", binding: $tempPaddingRight) { viewModel.paddingRightBinding.wrappedValue = $0 }
                         }
+                        .padding(.top, 4)
+                    }
                     }
 
                     if viewModel.currentTheme.customizationSchema.allowsTextAlignment {
@@ -218,10 +223,19 @@ private struct ExifStampLayoutTab: View {
                             HStack {
                                 Text("문구 크기")
                                 Spacer()
-                                Text("\(Int((viewModel.textScaleBinding.wrappedValue * 100).rounded()))%")
+                                Text("\(Int((tempTextScale * 100).rounded()))%")
                                     .foregroundStyle(.secondary)
                             }
-                            Slider(value: viewModel.textScaleBinding, in: 0.8...2.2, step: 0.05)
+                            Slider(
+                                value: $tempTextScale,
+                                in: 0.8...2.2,
+                                step: 0.05,
+                                onEditingChanged: { editing in
+                                    if !editing {
+                                        viewModel.textScaleBinding.wrappedValue = tempTextScale
+                                    }
+                                }
+                            )
                         }
                     }
 
@@ -269,9 +283,18 @@ private struct ExifStampLayoutTab: View {
             }
             .padding(.vertical)
         }
+        .onAppear {
+            syncTempsFromViewModel()
+        }
+        .onChange(of: viewModel.currentTheme.id) { _, _ in
+            syncTempsFromViewModel()
+        }
+        .onChange(of: viewModel.advancedPaddingEnabledBinding.wrappedValue) { _, _ in
+            syncTempsFromViewModel()
+        }
     }
 
-    private func paddingSlider(label: String, binding: Binding<Double>) -> some View {
+    private func paddingSlider(label: String, binding: Binding<Double>, onCommit: @escaping (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("패딩 \(label)")
@@ -279,8 +302,25 @@ private struct ExifStampLayoutTab: View {
                 Text("\(Int((binding.wrappedValue * 100).rounded()))%")
                     .foregroundStyle(.secondary)
             }
-            Slider(value: binding, in: 0...0.25, step: 0.005)
+            Slider(
+                value: binding,
+                in: 0...0.25,
+                step: 0.005,
+                onEditingChanged: { editing in
+                    if !editing {
+                        onCommit(binding.wrappedValue)
+                    }
+                }
+            )
         }
+    }
+
+    private func syncTempsFromViewModel() {
+        tempTextScale = viewModel.textScaleBinding.wrappedValue
+        tempPaddingTop = viewModel.paddingTopBinding.wrappedValue
+        tempPaddingBottom = viewModel.paddingBottomBinding.wrappedValue
+        tempPaddingLeft = viewModel.paddingLeftBinding.wrappedValue
+        tempPaddingRight = viewModel.paddingRightBinding.wrappedValue
     }
 }
 
@@ -499,6 +539,45 @@ final class ExifStampViewModel: ObservableObject {
     @Published private var userSettings: ExifStampUserSettings
     private var renderTask: Task<Void, Never>?
     private var renderGeneration: UInt = 0
+    private var lastRenderedGeneration: UInt = 0
+    private let renderCoordinator = RenderCoordinator()
+
+    private struct RenderRequest {
+        var generation: UInt
+        var originalImage: UIImage
+        var spec: ExifStampRenderSpec
+        var lines: (line1: String?, line2: String?)
+    }
+
+    private final class RenderCoordinator: @unchecked Sendable {
+        private let queue = DispatchQueue(label: "PhotoRava.ExifStampRenderQueue", qos: .userInitiated)
+        private var isRunning = false
+        private var pending: RenderRequest?
+
+        func enqueue(_ request: RenderRequest, completion: @escaping (UInt, UIImage) -> Void) {
+            queue.async {
+                self.pending = request
+                if self.isRunning { return }
+                self.isRunning = true
+
+                while let next = self.pending {
+                    self.pending = nil
+                    let image: UIImage = autoreleasepool {
+                        StampedImageRenderer.shared.render(
+                            originalImage: next.originalImage,
+                            line1: next.lines.line1,
+                            line2: next.lines.line2,
+                            spec: next.spec
+                        )
+                    }
+
+                    DispatchQueue.main.async { completion(next.generation, image) }
+                }
+
+                self.isRunning = false
+            }
+        }
+    }
     
     init() {
         self.userSettings = ExifStampUserSettingsPersistence.load()
@@ -739,19 +818,26 @@ final class ExifStampViewModel: ObservableObject {
         let lines = makeCaptionLines(theme: theme)
         captionLines = lines
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self, originalImage] in
-            let image = StampedImageRenderer.shared.render(
-                originalImage: originalImage,
-                line1: lines.line1,
-                line2: lines.line2,
-                spec: spec
-            )
+        enqueueRender(request: RenderRequest(
+            generation: generation,
+            originalImage: originalImage,
+            spec: spec,
+            lines: lines
+        ))
+    }
+
+    private func enqueueRender(request: RenderRequest) {
+        renderCoordinator.enqueue(request) { [weak self] generation, image in
             Task { @MainActor in
-                guard let self, self.renderGeneration == generation else { return }
+                guard let self else { return }
+                guard self.renderGeneration == generation else { return }
+                self.lastRenderedGeneration = generation
                 withAnimation(.easeInOut(duration: 0.18)) {
                     self.renderedImage = image
                 }
-                self.isRendering = false
+                if self.lastRenderedGeneration == self.renderGeneration {
+                    self.isRendering = false
+                }
             }
         }
     }
