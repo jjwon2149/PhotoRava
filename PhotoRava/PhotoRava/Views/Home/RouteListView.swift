@@ -220,12 +220,6 @@ struct RouteCardView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            
-            Spacer()
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .padding(12)
         .background(Color(.systemBackground))

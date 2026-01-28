@@ -10,12 +10,14 @@ import MapKit
 
 struct RouteMapView: View {
     let route: Route
+    private let onBack: (() -> Void)?
     @StateObject private var viewModel: RouteMapViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDetent: PresentationDetent = .medium
     
-    init(route: Route) {
+    init(route: Route, onBack: (() -> Void)? = nil) {
         self.route = route
+        self.onBack = onBack
         _viewModel = StateObject(wrappedValue: RouteMapViewModel(route: route))
     }
     
@@ -99,7 +101,11 @@ struct RouteMapView: View {
             VStack {
                 HStack {
                     Button {
-                        dismiss()
+                        if let onBack {
+                            onBack()
+                        } else {
+                            dismiss()
+                        }
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.body)
@@ -223,4 +229,3 @@ struct PhotoAnnotation: Identifiable {
     let roadName: String?
     let timestamp: Date
 }
-

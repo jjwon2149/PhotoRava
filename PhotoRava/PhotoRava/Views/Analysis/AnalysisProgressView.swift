@@ -15,7 +15,6 @@ struct AnalysisProgressView: View {
     @StateObject private var viewModel: AnalysisViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @State private var showingMapView = false
     
     init(photos: [LoadedPhoto]) {
         self.photos = photos
@@ -23,71 +22,62 @@ struct AnalysisProgressView: View {
     }
     
     var body: some View {
-        ZStack {
-            // Blurred background
-            backgroundView
-            
-            VStack(spacing: 40) {
-                // Title
-                VStack(spacing: 8) {
-                    Text(viewModel.currentStep)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    
-                    Text("위치 데이터를 정제하고 있습니다")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                
-                // Circular Progress
-                circularProgressView
-                
-                // Linear Progress
-                linearProgressView
-                
-                // Description
-                Text("잠시만 기다려 주세요. 사진의 메타데이터를 활용하여 상세 경로를 생성하고 있습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-            }
-            .padding()
-        }
-        .overlay(alignment: .topLeading) {
-            Button {
-                viewModel.cancelAnalysis()
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
-            }
-            .padding()
-        }
-        .overlay(alignment: .bottom) {
-            statusIndicator
-        }
-        .task {
-            viewModel.modelContext = modelContext
-            await viewModel.startAnalysis()
-        }
-        .onChange(of: viewModel.completedRoute) { _, newRoute in
-            if newRoute != nil {
-                // 분석 완료 후 지도 화면으로 이동
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    showingMapView = true
-                }
-            }
-        }
-        .fullScreenCover(isPresented: $showingMapView) {
+        Group {
             if let route = viewModel.completedRoute {
-                NavigationStack {
-                    RouteMapView(route: route)
+                RouteMapView(route: route, onBack: { dismiss() })
+            } else {
+                ZStack {
+                    // Blurred background
+                    backgroundView
+                    
+                    VStack(spacing: 40) {
+                        // Title
+                        VStack(spacing: 8) {
+                            Text(viewModel.currentStep)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            
+                            Text("위치 데이터를 정제하고 있습니다")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        // Circular Progress
+                        circularProgressView
+                        
+                        // Linear Progress
+                        linearProgressView
+                        
+                        // Description
+                        Text("잠시만 기다려 주세요. 사진의 메타데이터를 활용하여 상세 경로를 생성하고 있습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                    }
+                    .padding()
+                }
+                .overlay(alignment: .topLeading) {
+                    Button {
+                        viewModel.cancelAnalysis()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 40)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                    .padding()
+                }
+                .overlay(alignment: .bottom) {
+                    statusIndicator
+                }
+                .task {
+                    viewModel.modelContext = modelContext
+                    await viewModel.startAnalysis()
                 }
             }
         }

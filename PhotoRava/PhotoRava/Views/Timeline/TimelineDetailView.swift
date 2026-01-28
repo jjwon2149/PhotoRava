@@ -13,6 +13,7 @@ struct TimelineDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditSheet = false
     @State private var showingMapView = false
+    @StateObject private var locationResolver = TimelineLocationResolver()
     
     var body: some View {
         ScrollView {
@@ -119,6 +120,7 @@ struct TimelineDetailView: View {
             ForEach(Array(route.photoRecords.enumerated()), id: \.element.id) { index, record in
                 TimelineItemView(
                     record: record,
+                    locationResolver: locationResolver,
                     isFirst: index == 0,
                     isLast: index == route.photoRecords.count - 1
                 )
@@ -186,6 +188,7 @@ struct StatOverlay: View {
 
 struct TimelineItemView: View {
     let record: PhotoRecord
+    @ObservedObject var locationResolver: TimelineLocationResolver
     let isFirst: Bool
     let isLast: Bool
     
@@ -248,7 +251,7 @@ struct TimelineItemView: View {
                 
                 // Info
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(record.roadName ?? "위치 알 수 없음")
+                    Text(locationTitle)
                         .font(.body)
                         .fontWeight(.semibold)
                         .lineLimit(2)
@@ -277,6 +280,26 @@ struct TimelineItemView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 4)
+        .task {
+            if let lat = record.latitude, let lon = record.longitude {
+                if (record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+                    await locationResolver.resolveIfNeeded(latitude: lat, longitude: lon)
+                }
+            }
+        }
+    }
+    
+    private var locationTitle: String {
+        if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines), !roadName.isEmpty {
+            return roadName
+        }
+        if let lat = record.latitude, let lon = record.longitude {
+            if let cached = locationResolver.cachedName(latitude: lat, longitude: lon) {
+                return cached
+            }
+            return locationResolver.fallbackCoordinateText(latitude: lat, longitude: lon)
+        }
+        return "위치 알 수 없음"
     }
     
     private var dotColor: Color {
@@ -289,4 +312,3 @@ struct TimelineItemView: View {
         }
     }
 }
-
