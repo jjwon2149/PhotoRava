@@ -23,6 +23,17 @@ struct ExifStampMetadata: Equatable {
 final class ExifStampMetadataService {
     static let shared = ExifStampMetadataService()
     private init() {}
+
+    struct CaptionVisibility: Equatable {
+        var showsMake: Bool
+        var showsModel: Bool
+        var showsLens: Bool
+        var showsISO: Bool
+        var showsShutter: Bool
+        var showsFNumber: Bool
+        var showsFocalLength: Bool
+        var showsDate: Bool
+    }
     
     func extract(from imageData: Data, fallbackAsset: PHAsset?) -> ExifStampMetadata {
         var result = ExifStampMetadata()
@@ -68,55 +79,183 @@ final class ExifStampMetadataService {
     
     static func formatCaptionLines(
         metadata: ExifStampMetadata,
+        layout: ExifStampLayout,
+        visibility: CaptionVisibility,
+        dateFormatPreset: ExifStampDateFormatPreset,
         locale: Locale = .current
     ) -> (line1: String?, line2: String?) {
-        let makeModel = [metadata.make, metadata.model]
-            .compactMap { $0?.trimmedOrNil() }
-            .joined(separator: " ")
-            .trimmedOrNil()
-        
-        let line1: String? = {
-            guard var base = makeModel else { return nil }
-            if let lens = metadata.lensModel?.trimmedOrNil() {
-                base += " • \(lens)"
+        switch layout {
+        case .justFrame, .noFrame:
+            return (nil, nil)
+        case .twoLine:
+            return formatTwoLine(metadata: metadata, visibility: visibility, dateFormatPreset: dateFormatPreset, locale: locale)
+        case .simpleOneLine:
+            return (formatOneLine(metadata: metadata, visibility: visibility, dateFormatPreset: dateFormatPreset, locale: locale), nil)
+        case .shotOnOneLine:
+            return (formatShotOnOneLine(metadata: metadata, visibility: visibility, dateFormatPreset: dateFormatPreset, locale: locale), nil)
+        case .film, .monitor:
+            return formatTwoLine(metadata: metadata, visibility: visibility, dateFormatPreset: dateFormatPreset, locale: locale)
+        }
+    }
+
+    private static func formatTwoLine(
+        metadata: ExifStampMetadata,
+        visibility: CaptionVisibility,
+        dateFormatPreset: ExifStampDateFormatPreset,
+        locale: Locale
+    ) -> (line1: String?, line2: String?) {
+        var line1Parts: [String] = []
+        if visibility.showsMake, let make = metadata.make?.trimmedOrNil() {
+            line1Parts.append(make)
+        }
+        if visibility.showsModel, let model = metadata.model?.trimmedOrNil() {
+            line1Parts.append(model)
+        }
+        var line1 = line1Parts.joined(separator: " ").trimmedOrNil()
+        if visibility.showsLens, let lens = metadata.lensModel?.trimmedOrNil() {
+            if let existing = line1, !existing.isEmpty {
+                line1 = "\(existing) • \(lens)"
+            } else {
+                line1 = lens
             }
-            return base
-        }()
-        
+        }
+
         var tokens: [String] = []
-        if let iso = metadata.iso {
+        if visibility.showsISO, let iso = metadata.iso {
             tokens.append("ISO \(iso)")
         }
-        if let shutter = formatShutter(metadata.exposureTimeSeconds) {
+        if visibility.showsShutter, let shutter = formatShutter(metadata.exposureTimeSeconds) {
             tokens.append(shutter)
         }
-        if let f = metadata.fNumber {
+        if visibility.showsFNumber, let f = metadata.fNumber {
             tokens.append(String(format: "f/%.1f", f))
         }
-        if let focal = metadata.focalLengthMm {
+        if visibility.showsFocalLength, let focal = metadata.focalLengthMm {
             let focalText = focal >= 10 ? String(format: "%.0fmm", focal) : String(format: "%.1fmm", focal)
             tokens.append(focalText)
         }
-        
-        let dateText: String? = {
-            guard let date = metadata.capturedAt else { return nil }
-            let formatter = DateFormatter()
+
+        if visibility.showsDate, let dateText = formatDate(metadata.capturedAt, dateFormatPreset: dateFormatPreset, locale: locale) {
+            if !tokens.isEmpty { tokens.append("•") }
+            tokens.append(dateText)
+        }
+
+        let line2 = tokens.joined(separator: "  ").trimmedOrNil()
+        return (line1: line1, line2: line2)
+    }
+
+    private static func formatOneLine(
+        metadata: ExifStampMetadata,
+        visibility: CaptionVisibility,
+        dateFormatPreset: ExifStampDateFormatPreset,
+        locale: Locale
+    ) -> String? {
+        var segments: [String] = []
+
+        var makeModelParts: [String] = []
+        if visibility.showsMake, let make = metadata.make?.trimmedOrNil() {
+            makeModelParts.append(make)
+        }
+        if visibility.showsModel, let model = metadata.model?.trimmedOrNil() {
+            makeModelParts.append(model)
+        }
+        let makeModel = makeModelParts.joined(separator: " ").trimmedOrNil()
+        if let makeModel { segments.append(makeModel) }
+
+        if visibility.showsLens, let lens = metadata.lensModel?.trimmedOrNil() {
+            segments.append(lens)
+        }
+
+        var tokens: [String] = []
+        if visibility.showsISO, let iso = metadata.iso {
+            tokens.append("ISO \(iso)")
+        }
+        if visibility.showsShutter, let shutter = formatShutter(metadata.exposureTimeSeconds) {
+            tokens.append(shutter)
+        }
+        if visibility.showsFNumber, let f = metadata.fNumber {
+            tokens.append(String(format: "f/%.1f", f))
+        }
+        if visibility.showsFocalLength, let focal = metadata.focalLengthMm {
+            let focalText = focal >= 10 ? String(format: "%.0fmm", focal) : String(format: "%.1fmm", focal)
+            tokens.append(focalText)
+        }
+        let exposure = tokens.joined(separator: "  ").trimmedOrNil()
+        if let exposure { segments.append(exposure) }
+
+        if visibility.showsDate, let dateText = formatDate(metadata.capturedAt, dateFormatPreset: dateFormatPreset, locale: locale) {
+            segments.append(dateText)
+        }
+
+        return segments.joined(separator: " • ").trimmedOrNil()
+    }
+
+    private static func formatShotOnOneLine(
+        metadata: ExifStampMetadata,
+        visibility: CaptionVisibility,
+        dateFormatPreset: ExifStampDateFormatPreset,
+        locale: Locale
+    ) -> String? {
+        var makeModelParts: [String] = []
+        if visibility.showsMake, let make = metadata.make?.trimmedOrNil() {
+            makeModelParts.append(make)
+        }
+        if visibility.showsModel, let model = metadata.model?.trimmedOrNil() {
+            makeModelParts.append(model)
+        }
+        let makeModel = makeModelParts.joined(separator: " ").trimmedOrNil()
+
+        var segments: [String] = []
+        if let makeModel {
+            segments.append("Shot on \(makeModel)")
+        }
+
+        if visibility.showsLens, let lens = metadata.lensModel?.trimmedOrNil() {
+            segments.append(lens)
+        }
+
+        var tokens: [String] = []
+        if visibility.showsISO, let iso = metadata.iso {
+            tokens.append("ISO \(iso)")
+        }
+        if visibility.showsShutter, let shutter = formatShutter(metadata.exposureTimeSeconds) {
+            tokens.append(shutter)
+        }
+        if visibility.showsFNumber, let f = metadata.fNumber {
+            tokens.append(String(format: "f/%.1f", f))
+        }
+        if visibility.showsFocalLength, let focal = metadata.focalLengthMm {
+            let focalText = focal >= 10 ? String(format: "%.0fmm", focal) : String(format: "%.1fmm", focal)
+            tokens.append(focalText)
+        }
+        let exposure = tokens.joined(separator: "  ").trimmedOrNil()
+        if let exposure { segments.append(exposure) }
+
+        if visibility.showsDate, let dateText = formatDate(metadata.capturedAt, dateFormatPreset: dateFormatPreset, locale: locale) {
+            segments.append(dateText)
+        }
+
+        return segments.joined(separator: " • ").trimmedOrNil()
+    }
+
+    private static func formatDate(_ date: Date?, dateFormatPreset: ExifStampDateFormatPreset, locale: Locale) -> String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        switch dateFormatPreset {
+        case .locale:
             formatter.locale = locale
             formatter.dateStyle = .medium
             formatter.timeStyle = .none
-            return formatter.string(from: date).trimmedOrNil()
-        }()
-        
-        if let dateText {
-            if !tokens.isEmpty {
-                tokens.append("•")
-            }
-            tokens.append(dateText)
+        case .yyyyMMddSlashes:
+            formatter.locale = locale
+            formatter.timeZone = TimeZone.current
+            formatter.dateFormat = "yyyy/MM/dd"
+        case .yyyyMMddDots:
+            formatter.locale = locale
+            formatter.timeZone = TimeZone.current
+            formatter.dateFormat = "yyyy.MM.dd"
         }
-        
-        let line2 = tokens.joined(separator: "  ").trimmedOrNil()
-        
-        return (line1: line1, line2: line2)
+        return formatter.string(from: date).trimmedOrNil()
     }
     
     private static func extractISO(_ any: Any) -> Int? {
@@ -172,4 +311,3 @@ private extension String {
         return t.isEmpty ? nil : t
     }
 }
-

@@ -7,7 +7,7 @@
 
 import UIKit
 
-enum ExifStampTextAlignment: String, CaseIterable, Identifiable {
+enum ExifStampTextAlignment: String, CaseIterable, Identifiable, Codable {
     case leading
     case center
     case trailing
@@ -31,41 +31,21 @@ enum ExifStampTextAlignment: String, CaseIterable, Identifiable {
     }
 }
 
-struct ExifStampStyle: Equatable {
-    enum PaddingPreset: String, CaseIterable, Identifiable {
-        case none
-        case small
-        case medium
-        case large
-        
-        var id: String { rawValue }
-        
-        var label: String {
-            switch self {
-            case .none: return "없음"
-            case .small: return "작게"
-            case .medium: return "중간"
-            case .large: return "크게"
-            }
-        }
-        
-        /// Base padding as a fraction of the shortest image side.
-        var baseFraction: CGFloat {
-            switch self {
-            case .none: return 0
-            case .small: return 0.04
-            case .medium: return 0.07
-            case .large: return 0.10
-            }
-        }
-    }
-    
-    var paddingPreset: PaddingPreset = .medium
-    var backgroundColor: UIColor = .white
-    var textColor: UIColor = .black
-    var textAlignment: ExifStampTextAlignment = .center
+struct ExifStampPaddingFractions: Equatable {
+    var top: CGFloat
+    var bottom: CGFloat
+    var left: CGFloat
+    var right: CGFloat
+}
+
+struct ExifStampRenderSpec: Equatable {
+    var layout: ExifStampLayout
+    var paddingFractions: ExifStampPaddingFractions
+    var backgroundColor: UIColor
+    var textColor: UIColor
+    var textAlignment: ExifStampTextAlignment
     /// Multiplier for caption font sizes (user-controlled).
-    var textScale: CGFloat = 1.25
+    var textScale: CGFloat
 }
 
 final class StampedImageRenderer {
@@ -76,31 +56,33 @@ final class StampedImageRenderer {
         originalImage: UIImage,
         line1: String?,
         line2: String?,
-        style: ExifStampStyle
+        spec: ExifStampRenderSpec
     ) -> UIImage {
         let base = originalImage.normalizedOrientation()
         let originalSize = base.size
         
         let shortestSide = min(originalSize.width, originalSize.height)
-        let basePadding = shortestSide * style.paddingPreset.baseFraction
-        
-        let maxTextWidth = max(1, originalSize.width + (basePadding * 2))
-        let (textBlockSize, attributedText) = buildText(
+        let topPadding = shortestSide * spec.paddingFractions.top
+        let bottomBasePadding = shortestSide * spec.paddingFractions.bottom
+        let leftPadding = shortestSide * spec.paddingFractions.left
+        let rightPadding = shortestSide * spec.paddingFractions.right
+
+        let shouldDrawText = spec.layout.supportsCaption
+        let maxTextWidth = max(1, originalSize.width + leftPadding + rightPadding)
+        let (textBlockSize, attributedText) = shouldDrawText ? buildText(
             line1: line1,
             line2: line2,
             maxWidth: maxTextWidth,
-            style: style,
+            spec: spec,
             referenceWidth: originalSize.width
-        )
-        
-        let topPadding = basePadding
-        let sidePadding = basePadding
-        let captionPaddingTop = (textBlockSize.height > 0) ? (basePadding * 0.8) : 0
-        let captionPaddingBottom = (textBlockSize.height > 0) ? (basePadding * 0.9) : basePadding
-        let bottomPadding = basePadding + captionPaddingTop + textBlockSize.height + captionPaddingBottom
+        ) : (.zero, nil)
+
+        let captionPaddingTop = (textBlockSize.height > 0) ? (bottomBasePadding * 0.8) : 0
+        let captionPaddingBottom = (textBlockSize.height > 0) ? (bottomBasePadding * 0.9) : 0
+        let bottomPadding = bottomBasePadding + captionPaddingTop + textBlockSize.height + captionPaddingBottom
         
         let canvasSize = CGSize(
-            width: originalSize.width + sidePadding * 2,
+            width: originalSize.width + leftPadding + rightPadding,
             height: originalSize.height + topPadding + bottomPadding
         )
         
@@ -111,11 +93,11 @@ final class StampedImageRenderer {
         let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
         return renderer.image { ctx in
             let cg = ctx.cgContext
-            cg.setFillColor(style.backgroundColor.cgColor)
+            cg.setFillColor(spec.backgroundColor.cgColor)
             cg.fill(CGRect(origin: .zero, size: canvasSize))
             
             let imageRect = CGRect(
-                x: sidePadding,
+                x: leftPadding,
                 y: topPadding,
                 width: originalSize.width,
                 height: originalSize.height
@@ -130,7 +112,7 @@ final class StampedImageRenderer {
                 width: canvasSize.width,
                 height: textBlockSize.height
             )
-            attributedText.draw(in: textRect.insetBy(dx: sidePadding, dy: 0))
+            attributedText.draw(in: textRect.inset(by: UIEdgeInsets(top: 0, left: leftPadding, bottom: 0, right: rightPadding)))
         }
     }
     
@@ -138,7 +120,7 @@ final class StampedImageRenderer {
         line1: String?,
         line2: String?,
         maxWidth: CGFloat,
-        style: ExifStampStyle,
+        spec: ExifStampRenderSpec,
         referenceWidth: CGFloat
     ) -> (CGSize, NSAttributedString?) {
         let l1 = line1?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -146,13 +128,13 @@ final class StampedImageRenderer {
         let hasAny = !l1.isEmpty || !l2.isEmpty
         guard hasAny else { return (.zero, nil) }
         
-        let scale = max(0.7, min(2.5, style.textScale))
+        let scale = max(0.7, min(2.5, spec.textScale))
         let baseFontSize = max(30, min(90, referenceWidth * 0.060)) * scale
         let line1Font = UIFont.systemFont(ofSize: baseFontSize, weight: .semibold)
         let line2Font = UIFont.systemFont(ofSize: max(14, baseFontSize * 0.80), weight: .regular)
         
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = style.textAlignment.nsAlignment
+        paragraph.alignment = spec.textAlignment.nsAlignment
         paragraph.lineBreakMode = .byWordWrapping
         paragraph.lineSpacing = max(2, baseFontSize * 0.18)
         
@@ -162,7 +144,7 @@ final class StampedImageRenderer {
                 string: l1,
                 attributes: [
                     .font: line1Font,
-                    .foregroundColor: style.textColor,
+                    .foregroundColor: spec.textColor,
                     .paragraphStyle: paragraph
                 ]
             ))
@@ -173,7 +155,7 @@ final class StampedImageRenderer {
                 string: l2,
                 attributes: [
                     .font: line2Font,
-                    .foregroundColor: style.textColor.withAlphaComponent(0.9),
+                    .foregroundColor: spec.textColor.withAlphaComponent(0.9),
                     .paragraphStyle: paragraph
                 ]
             ))
