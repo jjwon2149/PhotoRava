@@ -31,26 +31,6 @@ struct RouteMapView: View {
                         .stroke(.blue, lineWidth: 4)
                 }
                 
-                // Start marker
-                if let start = viewModel.coordinates.first {
-                    Annotation("출발", coordinate: start) {
-                        ZStack {
-                            Circle()
-                                .fill(.green)
-                                .frame(width: 30, height: 30)
-                            
-                            Circle()
-                                .stroke(.white, lineWidth: 3)
-                                .frame(width: 30, height: 30)
-                            
-                            Text("S")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.white)
-                        }
-                    }
-                }
-                
                 // End marker
                 if let end = viewModel.coordinates.last {
                     Annotation("도착", coordinate: end) {
@@ -77,15 +57,14 @@ struct RouteMapView: View {
                         Button {
                             viewModel.selectedPhotoIndex = index
                         } label: {
-                            ZStack {
-                                Circle()
-                                    .fill(.blue.opacity(0.2))
-                                    .frame(width: 24, height: 24)
-                                
-                                Circle()
-                                    .fill(.blue)
-                                    .frame(width: 12, height: 12)
-                            }
+                            RoutePhotoMarkerView(
+                                thumbnail: viewModel.photoThumbnails[annotation.id],
+                                isSelected: viewModel.selectedPhotoIndex == index,
+                                borderColor: viewModel.markerBorderColor(for: annotation.id)
+                            )
+                        }
+                        .task(id: annotation.id) {
+                            await viewModel.ensureThumbnail(for: annotation)
                         }
                     }
                 }
@@ -143,8 +122,14 @@ class RouteMapViewModel: ObservableObject {
     @Published var cameraPosition: MapCameraPosition
     @Published var coordinates: [CLLocationCoordinate2D] = []
     @Published var photoAnnotations: [PhotoAnnotation] = []
+    @Published var photoThumbnails: [UUID: UIImage] = [:]
     @Published var selectedPhotoIndex: Int?
     @Published var showingBottomSheet = false
+    
+    private(set) var startPhotoId: UUID?
+    private(set) var endPhotoId: UUID?
+    
+    private var inFlightThumbnailIds: Set<UUID> = []
     
     init(route: Route) {
         self.route = route
@@ -167,12 +152,18 @@ class RouteMapViewModel: ObservableObject {
             for record in route.photoRecords {
                 if let lat = record.latitude, let lon = record.longitude {
                     photoAnnotations.append(PhotoAnnotation(
+                        id: record.id,
                         coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
                         roadName: record.roadName,
-                        timestamp: record.capturedAt
+                        timestamp: record.capturedAt,
+                        imageData: record.imageData
                     ))
                 }
             }
+            
+            let sortedByTime = photoAnnotations.sorted(by: { $0.timestamp < $1.timestamp })
+            startPhotoId = sortedByTime.first?.id
+            endPhotoId = sortedByTime.last?.id
             
             // 좌표가 있으면 카메라 위치 업데이트
             if !coordinates.isEmpty {
@@ -221,11 +212,97 @@ class RouteMapViewModel: ObservableObject {
     func saveRoute() {
         // 이미 저장되어 있음
     }
+
+    func ensureThumbnail(for annotation: PhotoAnnotation) async {
+        if photoThumbnails[annotation.id] != nil { return }
+        if inFlightThumbnailIds.contains(annotation.id) { return }
+        guard let data = annotation.imageData else { return }
+        
+        inFlightThumbnailIds.insert(annotation.id)
+        
+        let targetSize = CGSize(width: 44, height: 44)
+        Task.detached(priority: .utility) {
+            let image: UIImage? = autoreleasepool {
+                guard let base = UIImage(data: data) else { return nil }
+                return base.routeMarkerThumbnail(targetSize: targetSize)
+            }
+            
+            await MainActor.run {
+                self.inFlightThumbnailIds.remove(annotation.id)
+                if let image {
+                    self.photoThumbnails[annotation.id] = image
+                }
+            }
+        }
+    }
+    
+    func markerBorderColor(for photoId: UUID) -> Color {
+        if photoId == startPhotoId { return .green }
+        if photoId == endPhotoId { return .red }
+        return .white
+    }
 }
 
 struct PhotoAnnotation: Identifiable {
-    let id = UUID()
+    let id: UUID
     let coordinate: CLLocationCoordinate2D
     let roadName: String?
     let timestamp: Date
+    let imageData: Data?
+}
+
+private struct RoutePhotoMarkerView: View {
+    let thumbnail: UIImage?
+    let isSelected: Bool
+    let borderColor: Color
+    
+    var body: some View {
+        ZStack {
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.blue.opacity(0.18))
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isSelected ? Color.yellow : borderColor, lineWidth: isSelected ? 3 : 2)
+        }
+        .shadow(radius: 2)
+    }
+}
+
+private extension UIImage {
+    func routeMarkerThumbnail(targetSize: CGSize) -> UIImage {
+        let size = self.size
+        guard size.width > 0, size.height > 0 else { return self }
+        
+        let scaleFactor = max(targetSize.width / size.width, targetSize.height / size.height)
+        let scaledSize = CGSize(width: size.width * scaleFactor, height: size.height * scaleFactor)
+        let origin = CGPoint(
+            x: (targetSize.width - scaledSize.width) / 2.0,
+            y: (targetSize.height - scaledSize.height) / 2.0
+        )
+        
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        
+        return UIGraphicsImageRenderer(size: targetSize, format: format).image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: targetSize))
+            draw(in: CGRect(origin: origin, size: scaledSize))
+        }
+    }
 }
