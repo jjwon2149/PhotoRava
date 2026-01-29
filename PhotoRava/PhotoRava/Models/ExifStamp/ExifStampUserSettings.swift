@@ -96,13 +96,26 @@ struct ExifStampExportSettings: Codable, Equatable {
     var format: ExifStampExportFormat
     var jpegQuality: Double
     var keepExif: Bool
+    /// Batch export concurrency limit. Default is 1 to avoid OOM.
+    var batchConcurrencyLimit: Int
 
-    static let `default` = ExifStampExportSettings(format: .jpeg, jpegQuality: 0.9, keepExif: false)
+    static let `default` = ExifStampExportSettings(
+        format: .jpeg,
+        jpegQuality: 0.9,
+        keepExif: false,
+        batchConcurrencyLimit: 1
+    )
 
-    init(format: ExifStampExportFormat = .jpeg, jpegQuality: Double = 0.9, keepExif: Bool = false) {
+    init(
+        format: ExifStampExportFormat = .jpeg,
+        jpegQuality: Double = 0.9,
+        keepExif: Bool = false,
+        batchConcurrencyLimit: Int = 1
+    ) {
         self.format = format
         self.jpegQuality = jpegQuality
         self.keepExif = keepExif
+        self.batchConcurrencyLimit = batchConcurrencyLimit
     }
 
     init(from decoder: any Decoder) throws {
@@ -110,6 +123,7 @@ struct ExifStampExportSettings: Codable, Equatable {
         self.format = try container.decodeIfPresent(ExifStampExportFormat.self, forKey: .format) ?? .jpeg
         self.jpegQuality = try container.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? 0.9
         self.keepExif = try container.decodeIfPresent(Bool.self, forKey: .keepExif) ?? false
+        self.batchConcurrencyLimit = try container.decodeIfPresent(Int.self, forKey: .batchConcurrencyLimit) ?? 1
     }
 }
 
