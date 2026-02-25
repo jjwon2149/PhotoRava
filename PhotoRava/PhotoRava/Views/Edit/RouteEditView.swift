@@ -14,6 +14,7 @@ struct RouteEditView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var editMode: EditMode = .inactive
     @State private var showingDeleteAlert = false
+    @State private var showingSaveSuccess = false
     @State private var isRecalculating = false
     
     var body: some View {
@@ -96,6 +97,13 @@ struct RouteEditView: View {
             } message: {
                 Text("이 경로를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
             }
+            .alert("저장 완료", isPresented: $showingSaveSuccess) {
+                Button("확인") {
+                    dismiss()
+                }
+            } message: {
+                Text("경로 정보가 성공적으로 업데이트되었습니다.")
+            }
         }
     }
     
@@ -117,7 +125,7 @@ struct RouteEditView: View {
         try? modelContext.save()
         
         isRecalculating = false
-        dismiss()
+        showingSaveSuccess = true
     }
     
     private func deleteRoute() {
