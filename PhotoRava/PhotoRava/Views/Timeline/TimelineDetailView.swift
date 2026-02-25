@@ -13,20 +13,13 @@ struct TimelineDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditSheet = false
     @State private var showingMapView = false
-    @State private var selectedPhotoIndex: Int? = nil
     @StateObject private var locationResolver = TimelineLocationResolver()
     
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 // Map preview header
-                Button {
-                    selectedPhotoIndex = nil
-                    showingMapView = true
-                } label: {
-                    mapPreviewSection
-                }
-                .buttonStyle(.plain)
+                mapPreviewSection
                 
                 // Timeline content
                 VStack(alignment: .leading, spacing: 20) {
@@ -48,7 +41,6 @@ struct TimelineDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    selectedPhotoIndex = nil
                     showingMapView = true
                 } label: {
                     Image(systemName: "map")
@@ -68,7 +60,7 @@ struct TimelineDetailView: View {
         }
         .fullScreenCover(isPresented: $showingMapView) {
             NavigationStack {
-                RouteMapView(route: route, initialSelectedPhotoIndex: selectedPhotoIndex)
+                RouteMapView(route: route)
             }
         }
     }
@@ -101,15 +93,6 @@ struct TimelineDetailView: View {
                 }
                 .frame(height: 300)
                 .allowsHitTesting(false)
-                .overlay(alignment: .topTrailing) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption)
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                        .padding(12)
-                        .padding(.top, 40) // Status bar avoidance
-                }
             } else {
                 Rectangle()
                     .fill(Color(.systemGray6))
@@ -117,9 +100,9 @@ struct TimelineDetailView: View {
             }
             
             // Stats overlay
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 StatOverlay(
-                    title: "DISTANCE",
+                    title: "TOTAL DISTANCE",
                     value: String(format: "%.1f km", route.totalDistance)
                 )
                 
@@ -140,10 +123,7 @@ struct TimelineDetailView: View {
                     locationResolver: locationResolver,
                     isFirst: index == 0,
                     isLast: index == route.photoRecords.count - 1
-                ) {
-                    selectedPhotoIndex = index
-                    showingMapView = true
-                }
+                )
             }
         }
     }
@@ -179,7 +159,7 @@ struct TimelineDetailView: View {
     private func formatDuration(_ duration: TimeInterval) -> String {
         let hours = Int(duration) / 3600
         let minutes = (Int(duration) % 3600) / 60
-        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes) min"
     }
 }
 
@@ -188,20 +168,21 @@ struct StatOverlay: View {
     let value: String
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 8, weight: .bold))
+                .font(.caption2)
+                .fontWeight(.bold)
                 .foregroundStyle(.secondary)
-                .tracking(1)
+                .tracking(0.5)
             
             Text(value)
-                .font(.system(size: 14, weight: .bold))
+                .font(.title3)
+                .fontWeight(.bold)
                 .foregroundStyle(.primary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(12)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -210,7 +191,6 @@ struct TimelineItemView: View {
     @ObservedObject var locationResolver: TimelineLocationResolver
     let isFirst: Bool
     let isLast: Bool
-    let onTap: () -> Void
     
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -250,65 +230,53 @@ struct TimelineItemView: View {
             }
             
             // Content card
-            Button(action: onTap) {
-                HStack(spacing: 12) {
-                    // Photo thumbnail
-                    if let imageData = record.imageData,
-                       let uiImage = UIImage(data: imageData) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 64, height: 64)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    } else {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.systemGray5))
-                            .frame(width: 64, height: 64)
-                            .overlay(
-                                Image(systemName: "photo")
-                                    .foregroundStyle(.secondary)
-                            )
-                    }
-                    
-                    // Info
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(locationTitle)
-                            .font(.body)
-                            .fontWeight(.semibold)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        
-                        Text(record.capturedAt.formatted(date: .omitted, time: .shortened))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        
-                        // Confidence indicator
-                        if record.ocrConfidence > 0 {
-                            HStack(spacing: 4) {
-                                Image(systemName: record.ocrConfidence > 0.8 ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                    .font(.system(size: 10))
-                                Text(String(format: "%.0f%% 일치", record.ocrConfidence * 100))
-                                    .font(.system(size: 10, weight: .medium))
-                            }
-                            .foregroundStyle(record.ocrConfidence > 0.8 ? .green : .orange)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(record.ocrConfidence > 0.8 ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
-                            .clipShape(Capsule())
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                // Photo thumbnail
+                if let imageData = record.imageData,
+                   let uiImage = UIImage(data: imageData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        )
                 }
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                
+                // Info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(locationTitle)
+                        .font(.body)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                    
+                    Text(record.capturedAt.formatted(date: .omitted, time: .shortened))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    
+                    // Confidence indicator
+                    if record.ocrConfidence > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: record.ocrConfidence > 0.8 ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .font(.caption2)
+                            Text(String(format: "%.0f%% 일치", record.ocrConfidence * 100))
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(record.ocrConfidence > 0.8 ? .green : .orange)
+                    }
+                }
+                
+                Spacer()
             }
-            .buttonStyle(.plain)
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .padding(.horizontal)
         .padding(.vertical, 4)

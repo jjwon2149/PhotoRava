@@ -15,10 +15,10 @@ struct RouteMapView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDetent: PresentationDetent = .medium
     
-    init(route: Route, initialSelectedPhotoIndex: Int? = nil, onBack: (() -> Void)? = nil) {
+    init(route: Route, onBack: (() -> Void)? = nil) {
         self.route = route
         self.onBack = onBack
-        _viewModel = StateObject(wrappedValue: RouteMapViewModel(route: route, initialSelectedPhotoIndex: initialSelectedPhotoIndex))
+        _viewModel = StateObject(wrappedValue: RouteMapViewModel(route: route))
     }
     
     var body: some View {
@@ -55,9 +55,7 @@ struct RouteMapView: View {
                 ForEach(Array(viewModel.photoAnnotations.enumerated()), id: \.offset) { index, annotation in
                     Annotation("", coordinate: annotation.coordinate) {
                         Button {
-                            withAnimation(.easeInOut) {
-                                viewModel.selectPhoto(at: index)
-                            }
+                            viewModel.selectedPhotoIndex = index
                         } label: {
                             RoutePhotoMarkerView(
                                 thumbnail: viewModel.photoThumbnails[annotation.id],
@@ -114,10 +112,6 @@ struct RouteMapView: View {
         }
         .onAppear {
             viewModel.showingBottomSheet = true
-            // 초기 선택된 인덱스가 있으면 해당 위치로 이동
-            if let index = viewModel.selectedPhotoIndex {
-                viewModel.selectPhoto(at: index)
-            }
         }
     }
 }
@@ -137,9 +131,8 @@ class RouteMapViewModel: ObservableObject {
     
     private var inFlightThumbnailIds: Set<UUID> = []
     
-    init(route: Route, initialSelectedPhotoIndex: Int? = nil) {
+    init(route: Route) {
         self.route = route
-        self.selectedPhotoIndex = initialSelectedPhotoIndex
         
         // 기본 카메라 위치 (서울) - 먼저 초기화
         let defaultRegion = MKCoordinateRegion(
@@ -177,20 +170,6 @@ class RouteMapViewModel: ObservableObject {
                 let region = calculateRegion()
                 self.cameraPosition = .region(region)
             }
-        }
-    }
-    
-    func selectPhoto(at index: Int) {
-        guard index >= 0 && index < photoAnnotations.count else { return }
-        selectedPhotoIndex = index
-        let coordinate = photoAnnotations[index].coordinate
-        
-        // 해당 사진 위치로 카메라 이동
-        withAnimation {
-            cameraPosition = .region(MKCoordinateRegion(
-                center: coordinate,
-                span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
-            ))
         }
     }
     

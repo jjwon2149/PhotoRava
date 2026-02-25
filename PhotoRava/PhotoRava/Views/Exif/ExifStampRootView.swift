@@ -15,39 +15,24 @@ import ImageIO
 struct ExifStampRootView: View {
     @StateObject private var viewModel = ExifStampViewModel()
     @State private var selectedTab: ExifStampTab = .layout
-    @State private var selectionMode: ExifStampSelectionMode = .single
-    @State private var selectedBatchPreviewIdentifier: String?
-    
-    private var showsEditor: Bool {
-        viewModel.originalImage != nil || (selectionMode == .batch && viewModel.batchSelectionCount > 0)
-    }
+    @State private var lastBatchPreviewIdentifier: String?
     
     var body: some View {
         NavigationStack {
             Group {
-                if showsEditor {
-                    VStack(spacing: 12) {
-                        selectionModePicker
-                        
-                        if selectionMode == .batch, viewModel.batchSelectionCount > 0 {
-                            batchPreviewSection
-                        }
-                        
-                        tabSegmentPicker
-                        
-                        Group {
-                            switch selectedTab {
-                            case .layout:
-                                ExifStampLayoutTab(viewModel: viewModel)
-                            case .theme:
-                                ExifStampThemeTab(viewModel: viewModel)
-                            case .export:
-                                ExifStampExportTab(
-                                    viewModel: viewModel,
-                                    selectedBatchPreviewIdentifier: $selectedBatchPreviewIdentifier
-                                )
-                            }
-                        }
+                if viewModel.originalImage != nil {
+                    TabView(selection: $selectedTab) {
+                        ExifStampLayoutTab(viewModel: viewModel)
+                            .tabItem { Label("프레임", systemImage: "rectangle.inset.filled") }
+                            .tag(ExifStampTab.layout)
+
+                        ExifStampThemeTab(viewModel: viewModel)
+                            .tabItem { Label("테마", systemImage: "paintpalette") }
+                            .tag(ExifStampTab.theme)
+
+                        ExifStampExportTab(viewModel: viewModel)
+                            .tabItem { Label("내보내기", systemImage: "square.and.arrow.up") }
+                            .tag(ExifStampTab.export)
                     }
                 } else {
                     emptyStateView
@@ -56,7 +41,23 @@ struct ExifStampRootView: View {
             .navigationTitle("EXIF")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    toolbarPhotoPicker
+                    PhotosPicker(
+                        selection: $viewModel.selectedItem,
+                        matching: .images
+                    ) {
+                        Image(systemName: "photo.badge.plus")
+                    }
+                    .disabled(viewModel.isProcessing)
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    PhotosPicker(
+                        selection: $viewModel.batchSelectedItems,
+                        matching: .images
+                    ) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                    }
+                    .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
                 }
             }
             .overlay(alignment: .top) {
@@ -94,8 +95,12 @@ struct ExifStampRootView: View {
             .onChange(of: viewModel.selectedItem) { _, _ in
                 Task { await viewModel.loadSelectedPhoto() }
             }
-            .onChange(of: viewModel.batchSelectionCount) { _, _ in
-                syncBatchPreviewSelection()
+            .onChange(of: viewModel.batchSelectedItems) { _, newValue in
+                guard let first = newValue.first else { return }
+                let id = first.itemIdentifier ?? UUID().uuidString
+                guard lastBatchPreviewIdentifier != id else { return }
+                lastBatchPreviewIdentifier = id
+                viewModel.selectedItem = first
             }
         }
     }
@@ -115,108 +120,6 @@ struct ExifStampRootView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             
-            selectionModePicker
-                .padding(.horizontal, 12)
-            
-            emptyStatePickerButton
-            
-            if selectionMode == .batch, viewModel.batchSelectionCount > 0 {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("프리뷰 선택")
-                        .font(.headline)
-                    Text("편집 기준으로 사용할 사진을 직접 선택하세요.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ExifStampBatchPreviewStrip(
-                        viewModel: viewModel,
-                        selectedIdentifier: $selectedBatchPreviewIdentifier
-                    ) { source in
-                        selectedBatchPreviewIdentifier = source.identifier
-                        Task { await viewModel.loadBatchPreviewSource(source) }
-                    }
-                }
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
-    }
-    
-    private var tabSegmentPicker: some View {
-        Picker("편집 단계", selection: $selectedTab) {
-            Text("프레임").tag(ExifStampTab.layout)
-            Text("테마").tag(ExifStampTab.theme)
-            Text("내보내기").tag(ExifStampTab.export)
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-    }
-    
-    private var selectionModePicker: some View {
-        Picker("선택 모드", selection: $selectionMode) {
-            ForEach(ExifStampSelectionMode.allCases) { mode in
-                Text(mode.label).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-    
-    private var batchPreviewSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("배치 프리뷰")
-                    .font(.headline)
-                Spacer()
-                Text("\(viewModel.batchSelectionCount)장")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            if viewModel.originalImage == nil {
-                Text("편집 시작을 위해 프리뷰 사진을 선택하세요.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            ExifStampBatchPreviewStrip(
-                viewModel: viewModel,
-                selectedIdentifier: $selectedBatchPreviewIdentifier
-            ) { source in
-                selectedBatchPreviewIdentifier = source.identifier
-                Task { await viewModel.loadBatchPreviewSource(source) }
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-    
-    @ViewBuilder
-    private var toolbarPhotoPicker: some View {
-        if selectionMode == .single {
-            PhotosPicker(
-                selection: $viewModel.selectedItem,
-                matching: .images
-            ) {
-                Image(systemName: "photo.badge.plus")
-            }
-            .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
-        } else {
-            PhotosPicker(
-                selection: $viewModel.batchSelectedItems,
-                maxSelectionCount: 50,
-                matching: .images
-            ) {
-                Image(systemName: "photo.badge.plus")
-            }
-            .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
-        }
-    }
-    
-    @ViewBuilder
-    private var emptyStatePickerButton: some View {
-        if selectionMode == .single {
             PhotosPicker(
                 selection: $viewModel.selectedItem,
                 matching: .images
@@ -228,29 +131,23 @@ struct ExifStampRootView: View {
                     .background(.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
-        } else {
+            .disabled(viewModel.isProcessing)
+
             PhotosPicker(
                 selection: $viewModel.batchSelectedItems,
-                maxSelectionCount: 50,
                 matching: .images
             ) {
                 Text("여러 장 선택")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 200, height: 50)
-                    .background(.primary)
+                    .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
         }
-    }
-    
-    private func syncBatchPreviewSelection() {
-        guard let selectedBatchPreviewIdentifier else { return }
-        if !viewModel.batchSources.contains(where: { $0.identifier == selectedBatchPreviewIdentifier }) {
-            self.selectedBatchPreviewIdentifier = nil
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 }
 
@@ -258,20 +155,6 @@ enum ExifStampTab: Hashable {
     case layout
     case theme
     case export
-}
-
-private enum ExifStampSelectionMode: String, CaseIterable, Identifiable {
-    case single
-    case batch
-    
-    var id: String { rawValue }
-    
-    var label: String {
-        switch self {
-        case .single: return "단일"
-        case .batch: return "일괄"
-        }
-    }
 }
 
 private enum ExifStampExportTarget: String, CaseIterable, Identifiable {
@@ -332,52 +215,6 @@ private struct ExifStampOptionsCard<Content: View>: View {
         .padding(16)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-}
-
-private struct ExifStampBatchPreviewStrip: View {
-    @ObservedObject var viewModel: ExifStampViewModel
-    @Binding var selectedIdentifier: String?
-    let onSelect: (ExifStampViewModel.BatchSource) -> Void
-    @State private var thumbnailCache: [String: UIImage] = [:]
-    
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(viewModel.batchSources, id: \.identifier) { source in
-                    Button {
-                        selectedIdentifier = source.identifier
-                        onSelect(source)
-                    } label: {
-                        ZStack {
-                            if let image = thumbnailCache[source.identifier] {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                            } else {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.secondarySystemBackground))
-                                ProgressView()
-                            }
-                        }
-                        .frame(width: 92, height: 92)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(selectedIdentifier == source.identifier ? Color.primary : Color.clear, lineWidth: 2)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .task(id: source.identifier) {
-                        if thumbnailCache[source.identifier] != nil { return }
-                        if let thumb = await viewModel.thumbnailImage(for: source) {
-                            thumbnailCache[source.identifier] = thumb
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 2)
-        }
     }
 }
 
@@ -675,46 +512,19 @@ private struct ExifStampThemeTab: View {
 
 private struct ExifStampExportTab: View {
     @ObservedObject var viewModel: ExifStampViewModel
-    @Binding var selectedBatchPreviewIdentifier: String?
     @State private var exportTarget: ExifStampExportTarget = .single
-    @State private var showAdvancedOptions = false
-    @State private var showBatchDetails = false
-    @State private var showBatchResults = false
-    
-    private var isBatchMode: Bool {
-        exportTarget == .batch
-    }
-    
-    private var hasBatchDetailContent: Bool {
-        !viewModel.batchExportState.lastFailures.isEmpty
-            || !viewModel.batchExportState.results.isEmpty
-            || viewModel.canRetryLastBatch
-    }
+    @State private var showBatchResults: Bool = false
+    @State private var selectedBatchPreviewIdentifier: String?
+    @State private var thumbnailCache: [String: UIImage] = [:]
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 ExifStampPreviewCard(image: viewModel.renderedImage, isRendering: viewModel.isRendering)
-                
-                if isBatchMode, viewModel.batchSelectionCount > 0 {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("프리뷰 선택")
-                                .font(.headline)
-                            Spacer()
-                            Text("\(viewModel.batchSelectionCount)장")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        ExifStampBatchPreviewStrip(
-                            viewModel: viewModel,
-                            selectedIdentifier: $selectedBatchPreviewIdentifier
-                        ) { source in
-                            selectedBatchPreviewIdentifier = source.identifier
-                            Task { await viewModel.loadBatchPreviewSource(source) }
-                        }
-                    }
-                    .padding(.horizontal)
+
+                if exportTarget == .batch, viewModel.batchSelectionCount > 0 {
+                    batchPreviewStrip
+                        .padding(.horizontal)
                 }
 
                 ExifStampOptionsCard(title: "내보내기") {
@@ -722,37 +532,90 @@ private struct ExifStampExportTab: View {
                         Text("내보내기 대상")
                         Spacer()
                         Picker("내보내기 대상", selection: $exportTarget) {
-                            ForEach(ExifStampExportTarget.allCases) { target in
-                                Text(target.label).tag(target)
+                            ForEach(ExifStampExportTarget.allCases) { t in
+                                Text(t.label).tag(t)
                             }
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 200)
                     }
-                    .disabled(viewModel.batchExportState.isRunning && isBatchMode)
-                    
-                    if isBatchMode {
+                    .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
+
+                    if exportTarget == .batch {
                         HStack {
                             Text("선택된 사진")
                             Spacer()
                             Text("\(viewModel.batchSelectionCount)장")
                                 .foregroundStyle(.secondary)
                         }
-                        
-                        if viewModel.batchSelectionCount == 0 {
-                            Text("일괄 내보내기 대상이 없습니다. 상단에서 사진을 선택하세요.")
-                                .font(.caption)
+                    }
+
+                    if exportTarget == .batch {
+                        HStack {
+                            Text("동시 처리")
+                            Spacer()
+                            Picker("동시 처리", selection: viewModel.batchConcurrencyLimitBinding) {
+                                Text("1").tag(1)
+                                Text("2").tag(2)
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 140)
+                        }
+                        .disabled(viewModel.batchExportState.isRunning)
+                    }
+
+                    if exportTarget == .batch {
+                        Text("배치 공유는 선택된 파일들을 여러 개로 공유합니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("포맷")
+                        Spacer()
+                        Picker("포맷", selection: viewModel.exportFormatBinding) {
+                            ForEach(ExifStampExportFormat.allCases) { f in
+                                Text(f.label).tag(f)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(viewModel.exportFormatBinding.wrappedValue == .heic ? "HEIC 품질" : "JPEG 품질")
+                            Spacer()
+                            Text("\(Int((viewModel.jpegQualityBinding.wrappedValue * 100).rounded()))%")
                                 .foregroundStyle(.secondary)
                         }
+                        Slider(value: viewModel.jpegQualityBinding, in: 0.2...1.0, step: 0.01)
                     }
-                    
-                    if isBatchMode, viewModel.batchExportState.isRunning {
+                    .opacity(viewModel.exportFormatBinding.wrappedValue.supportsQuality ? 1.0 : 0.35)
+                    .disabled(!viewModel.exportFormatBinding.wrappedValue.supportsQuality || (viewModel.batchExportState.isRunning && exportTarget == .batch))
+
+                    Toggle("EXIF 유지(가능한 경우)", isOn: viewModel.keepExifBinding)
+                        .disabled((exportTarget == .single && viewModel.originalImageData == nil) || (viewModel.batchExportState.isRunning && exportTarget == .batch))
+
+                    if exportTarget == .single, viewModel.originalImageData == nil {
+                        Text("이 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if exportTarget == .batch, viewModel.keepExifBinding.wrappedValue {
+                        Text("일부 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않을 수 있습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if exportTarget == .batch, viewModel.batchExportState.isRunning {
                         VStack(alignment: .leading, spacing: 10) {
                             ProgressView(value: viewModel.batchExportState.progressFraction) {
                                 Text("진행 \(viewModel.batchExportState.completed + viewModel.batchExportState.failed)/\(viewModel.batchExportState.total)")
                             }
                             .progressViewStyle(.linear)
-                            
+
                             HStack(spacing: 12) {
                                 Text("처리 중: \(max(0, viewModel.batchExportState.currentIndex))/\(viewModel.batchExportState.total)")
                                     .font(.caption)
@@ -763,14 +626,61 @@ private struct ExifStampExportTab: View {
                                 }
                             }
                         }
+                        .padding(.top, 6)
                     }
-                    
-                    if isBatchMode, let summary = viewModel.batchExportState.lastSummary {
+
+                    if exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
                         Text(summary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    
+
+                    if exportTarget == .batch, !viewModel.batchExportState.lastFailures.isEmpty {
+                        DisclosureGroup("실패 내역 (\(viewModel.batchExportState.failed)건)") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(viewModel.batchExportState.lastFailures.enumerated()), id: \.offset) { _, line in
+                                    Text(line)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+
+                    if exportTarget == .batch, !viewModel.batchExportState.results.isEmpty {
+                        DisclosureGroup("결과 보기", isExpanded: $showBatchResults) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(viewModel.batchExportState.results) { r in
+                                    HStack(spacing: 10) {
+                                        Text(String(format: "%03d", r.index + 1))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 44, alignment: .leading)
+                                        Text(resultLabel(for: r.status))
+                                            .font(.caption)
+                                            .foregroundStyle(r.status == .failed ? .red : .secondary)
+                                        if let message = r.message, r.status == .failed {
+                                            Text(message)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                            }
+                            .padding(.top, 6)
+                        }
+                    }
+
+                    if exportTarget == .batch, viewModel.canRetryLastBatch, !viewModel.batchExportState.isRunning {
+                        Button("실패 항목 재시도") {
+                            viewModel.retryFailedBatch()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
                     HStack(spacing: 12) {
                         if exportTarget == .single {
                             Button {
@@ -783,7 +693,7 @@ private struct ExifStampExportTab: View {
                             .buttonStyle(.bordered)
                             .tint(.primary)
                             .disabled(viewModel.renderedImage == nil)
-                            
+
                             Button {
                                 Task { await viewModel.saveRenderedToPhotos() }
                             } label: {
@@ -804,7 +714,7 @@ private struct ExifStampExportTab: View {
                             .buttonStyle(.bordered)
                             .tint(.primary)
                             .disabled(viewModel.batchSelectionCount == 0 || viewModel.batchExportState.isRunning)
-                            
+
                             Button {
                                 viewModel.startBatchSaveToPhotos()
                             } label: {
@@ -816,126 +726,18 @@ private struct ExifStampExportTab: View {
                             .disabled(viewModel.batchSelectionCount == 0 || viewModel.batchExportState.isRunning)
                         }
                     }
-                    
-                    DisclosureGroup("고급 설정", isExpanded: $showAdvancedOptions) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if isBatchMode {
-                                HStack {
-                                    Text("동시 처리")
-                                    Spacer()
-                                    Picker("동시 처리", selection: viewModel.batchConcurrencyLimitBinding) {
-                                        Text("1").tag(1)
-                                        Text("2").tag(2)
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .frame(width: 140)
-                                }
-                                .disabled(viewModel.batchExportState.isRunning)
-                                
-                                Text("배치 공유는 선택된 파일들을 여러 개로 공유합니다.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            HStack {
-                                Text("포맷")
-                                Spacer()
-                                Picker("포맷", selection: viewModel.exportFormatBinding) {
-                                    ForEach(ExifStampExportFormat.allCases) { format in
-                                        Text(format.label).tag(format)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                            }
-                            .disabled(viewModel.batchExportState.isRunning && isBatchMode)
-                            
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text(viewModel.exportFormatBinding.wrappedValue == .heic ? "HEIC 품질" : "JPEG 품질")
-                                    Spacer()
-                                    Text("\(Int((viewModel.jpegQualityBinding.wrappedValue * 100).rounded()))%")
-                                        .foregroundStyle(.secondary)
-                                }
-                                Slider(value: viewModel.jpegQualityBinding, in: 0.2...1.0, step: 0.01)
-                            }
-                            .opacity(viewModel.exportFormatBinding.wrappedValue.supportsQuality ? 1.0 : 0.35)
-                            .disabled(!viewModel.exportFormatBinding.wrappedValue.supportsQuality || (viewModel.batchExportState.isRunning && isBatchMode))
-                            
-                            Toggle("EXIF 유지(가능한 경우)", isOn: viewModel.keepExifBinding)
-                                .disabled((exportTarget == .single && viewModel.originalImageData == nil) || (viewModel.batchExportState.isRunning && isBatchMode))
-                            
-                            if exportTarget == .single, viewModel.originalImageData == nil {
-                                Text("이 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않습니다.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            if isBatchMode, viewModel.keepExifBinding.wrappedValue {
-                                Text("일부 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않을 수 있습니다.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.top, 6)
-                    }
-                    
-                    if isBatchMode, hasBatchDetailContent {
-                        DisclosureGroup("작업 상세", isExpanded: $showBatchDetails) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                if !viewModel.batchExportState.lastFailures.isEmpty {
-                                    Text("실패 내역")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    
-                                    ForEach(Array(viewModel.batchExportState.lastFailures.enumerated()), id: \.offset) { _, line in
-                                        Text(line)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                
-                                if !viewModel.batchExportState.results.isEmpty {
-                                    DisclosureGroup("결과 보기", isExpanded: $showBatchResults) {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            ForEach(viewModel.batchExportState.results) { result in
-                                                HStack(spacing: 10) {
-                                                    Text(String(format: "%03d", result.index + 1))
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                        .frame(width: 44, alignment: .leading)
-                                                    Text(resultLabel(for: result.status))
-                                                        .font(.caption)
-                                                        .foregroundStyle(result.status == .failed ? .red : .secondary)
-                                                    if let message = result.message, result.status == .failed {
-                                                        Text(message)
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                            .lineLimit(1)
-                                                    }
-                                                    Spacer()
-                                                }
-                                            }
-                                        }
-                                        .padding(.top, 6)
-                                    }
-                                }
-                                
-                                if viewModel.canRetryLastBatch, !viewModel.batchExportState.isRunning {
-                                    Button("실패 항목 재시도") {
-                                        viewModel.retryFailedBatch()
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                            }
-                            .padding(.top, 6)
-                        }
-                    }
                 }
                 .padding(.horizontal)
-                
+
                 Spacer(minLength: 12)
             }
             .padding(.vertical)
+        }
+        .onAppear {
+            syncSelectedBatchPreviewIfNeeded()
+        }
+        .onChange(of: exportTarget) { _, _ in
+            syncSelectedBatchPreviewIfNeeded()
         }
         .onChange(of: viewModel.batchSelectionCount) { _, _ in
             syncSelectedBatchPreviewIfNeeded()
@@ -951,9 +753,67 @@ private struct ExifStampExportTab: View {
     }
 
     private func syncSelectedBatchPreviewIfNeeded() {
-        guard let selectedBatchPreviewIdentifier else { return }
-        if !viewModel.batchSources.contains(where: { $0.identifier == selectedBatchPreviewIdentifier }) {
-            self.selectedBatchPreviewIdentifier = nil
+        guard exportTarget == .batch else { return }
+        guard !viewModel.batchSources.isEmpty else {
+            selectedBatchPreviewIdentifier = nil
+            return
+        }
+        let existing = selectedBatchPreviewIdentifier
+        if let existing, viewModel.batchSources.contains(where: { $0.identifier == existing }) {
+            return
+        }
+        let first = viewModel.batchSources[0]
+        selectedBatchPreviewIdentifier = first.identifier
+        Task { await viewModel.loadBatchPreviewSource(first) }
+    }
+
+    private var batchPreviewStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("프리뷰 선택")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.batchSelectionCount)장")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { _, source in
+                        Button {
+                            selectedBatchPreviewIdentifier = source.identifier
+                            Task { await viewModel.loadBatchPreviewSource(source) }
+                        } label: {
+                            ZStack {
+                                if let image = thumbnailCache[source.identifier] {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(.secondarySystemBackground))
+                                    ProgressView()
+                                }
+                            }
+                            .frame(width: 92, height: 92)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(selectedBatchPreviewIdentifier == source.identifier ? Color.primary : Color.clear, lineWidth: 2)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .task(id: source.identifier) {
+                            if thumbnailCache[source.identifier] != nil { return }
+                            if let thumb = await viewModel.thumbnailImage(for: source) {
+                                thumbnailCache[source.identifier] = thumb
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
         }
     }
 }
