@@ -12,33 +12,47 @@ import UIKit
 import UniformTypeIdentifiers
 import ImageIO
 
+struct ExifStampScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct ExifStampRootView: View {
     @StateObject private var viewModel = ExifStampViewModel()
     @State private var selectedTab: ExifStampTab = .layout
     @State private var lastBatchPreviewIdentifier: String?
+    @State private var showingFullScreenPreview = false
     
     var body: some View {
         NavigationStack {
-            Group {
-                if viewModel.originalImage != nil {
-                    TabView(selection: $selectedTab) {
-                        ExifStampLayoutTab(viewModel: viewModel)
-                            .tabItem { Label("프레임", systemImage: "rectangle.inset.filled") }
-                            .tag(ExifStampTab.layout)
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
 
-                        ExifStampThemeTab(viewModel: viewModel)
-                            .tabItem { Label("테마", systemImage: "paintpalette") }
-                            .tag(ExifStampTab.theme)
+                Group {
+                    if viewModel.originalImage != nil {
+                        TabView(selection: $selectedTab) {
+                            ExifStampLayoutTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+                                .tabItem { Label("프레임", systemImage: "rectangle.inset.filled") }
+                                .tag(ExifStampTab.layout)
 
-                        ExifStampExportTab(viewModel: viewModel)
-                            .tabItem { Label("내보내기", systemImage: "square.and.arrow.up") }
-                            .tag(ExifStampTab.export)
+                            ExifStampThemeTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+                                .tabItem { Label("테마", systemImage: "paintpalette") }
+                                .tag(ExifStampTab.theme)
+
+                            ExifStampExportTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+                                .tabItem { Label("내보내기", systemImage: "square.and.arrow.up") }
+                                .tag(ExifStampTab.export)
+                        }
+                    } else {
+                        emptyStateView
                     }
-                } else {
-                    emptyStateView
                 }
             }
             .navigationTitle("EXIF")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     PhotosPicker(
@@ -101,6 +115,9 @@ struct ExifStampRootView: View {
                 guard lastBatchPreviewIdentifier != id else { return }
                 lastBatchPreviewIdentifier = id
                 viewModel.selectedItem = first
+            }
+            .fullScreenCover(isPresented: $showingFullScreenPreview) {
+                ExifStampFullScreenPreview(image: viewModel.renderedImage)
             }
         }
     }
@@ -171,22 +188,69 @@ private enum ExifStampExportTarget: String, CaseIterable, Identifiable {
     }
 }
 
+private struct ExifStampFullScreenPreview: View {
+    let image: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                if let image {
+                    ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .containerRelativeFrame(.horizontal)
+                    }
+                    .defaultScrollAnchor(.center)
+                }
+            }
+            .navigationTitle("원본 미리보기")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("닫기") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct ExifStampPreviewCard: View {
     let image: UIImage?
     let isRendering: Bool
+    @Binding var showingFullScreen: Bool
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottomTrailing) {
             Group {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
                 } else {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Color(.secondarySystemBackground))
                         .frame(height: 240)
+                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                }
+            }
+
+            if let _ = image, !isRendering {
+                Button {
+                    showingFullScreen = true
+                } label: {
+                    Image(systemName: "magnifyingglass.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.primary)
+                        .background(Circle().fill(.ultraThinMaterial))
+                        .padding(8)
                 }
             }
 
@@ -196,6 +260,7 @@ private struct ExifStampPreviewCard: View {
                     .padding(.vertical, 8)
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .padding(.horizontal)
@@ -220,130 +285,177 @@ private struct ExifStampOptionsCard<Content: View>: View {
 
 private struct ExifStampLayoutTab: View {
     @ObservedObject var viewModel: ExifStampViewModel
+    @Binding var showingFullScreenPreview: Bool
+    
+    @State private var scrollOffset: CGFloat = 0
     @State private var tempTextScale: Double = 1.25
     @State private var tempPaddingTop: Double = 0
     @State private var tempPaddingBottom: Double = 0
     @State private var tempPaddingLeft: Double = 0
     @State private var tempPaddingRight: Double = 0
 
+    private var previewScale: CGFloat {
+        if scrollOffset <= 0 { return 1.0 }
+        let scale = 1.0 - (scrollOffset / 350) // 더 빨리 작아지게 변경
+        return max(0.25, scale) // 최소 크기를 0.25로 더 축소
+    }
+
+    private var previewOffset: CGSize {
+        if scrollOffset <= 0 { return .zero }
+        // 우측 상단으로 더 바짝 붙도록 오프셋 조정
+        let x = scrollOffset * 0.5
+        let y = -scrollOffset * 0.05
+        return CGSize(width: min(x, 150), height: max(y, -40))
+    }
+
+    private var previewOpacity: Double {
+        if scrollOffset <= 50 { return 1.0 }
+        let opacity = 1.0 - (scrollOffset / 1000)
+        return max(0.7, opacity) // 스크롤 시 약간 투명하게
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ExifStampPreviewCard(image: viewModel.renderedImage, isRendering: viewModel.isRendering)
+        ZStack(alignment: .top) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Placeholder for the preview card to keep its space when large
+                    Color.clear
+                        .frame(height: 300)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ExifStampScrollOffsetKey.self, value: -geo.frame(in: .named("scroll")).minY)
+                        })
 
-                ExifStampOptionsCard(title: "프레임/레이아웃") {
-                    HStack {
-                        Text("레이아웃")
-                        Spacer()
-                        Text(viewModel.currentTheme.layout.label)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if viewModel.currentTheme.customizationSchema.allowsPaddingPreset {
+                    ExifStampOptionsCard(title: "프레임/레이아웃") {
                         HStack {
-                            Text("패딩")
+                            Text("레이아웃")
                             Spacer()
-                            Picker("패딩", selection: viewModel.paddingPresetBinding) {
-                                ForEach(ExifStampPaddingPreset.allCases) { p in
-                                    Text(p.label).tag(p)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        }
-                    }
-
-                    if viewModel.currentTheme.customizationSchema.allowsAdvancedPadding {
-                        Toggle("고급 패딩", isOn: viewModel.advancedPaddingEnabledBinding)
-
-                    if viewModel.advancedPaddingEnabledBinding.wrappedValue {
-                        VStack(spacing: 10) {
-                            paddingSlider(label: "상", binding: $tempPaddingTop) { viewModel.paddingTopBinding.wrappedValue = $0 }
-                            paddingSlider(label: "하", binding: $tempPaddingBottom) { viewModel.paddingBottomBinding.wrappedValue = $0 }
-                            paddingSlider(label: "좌", binding: $tempPaddingLeft) { viewModel.paddingLeftBinding.wrappedValue = $0 }
-                            paddingSlider(label: "우", binding: $tempPaddingRight) { viewModel.paddingRightBinding.wrappedValue = $0 }
-                        }
-                        .padding(.top, 4)
-                    }
-                    }
-
-                    if viewModel.currentTheme.customizationSchema.allowsTextAlignment {
-                        HStack {
-                            Text("정렬")
-                            Spacer()
-                            Picker("정렬", selection: viewModel.textAlignmentBinding) {
-                                ForEach(ExifStampTextAlignment.allCases) { a in
-                                    Text(a.label).tag(a)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 240)
-                        }
-                    }
-
-                    if viewModel.currentTheme.customizationSchema.allowsTextScale {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("문구 크기")
-                                Spacer()
-                                Text("\(Int((tempTextScale * 100).rounded()))%")
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(
-                                value: $tempTextScale,
-                                in: 0.8...2.2,
-                                step: 0.05,
-                                onEditingChanged: { editing in
-                                    if !editing {
-                                        viewModel.textScaleBinding.wrappedValue = tempTextScale
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    if let line1 = viewModel.captionLines.line1 ?? viewModel.captionLines.line2 {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("문구 미리보기")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(line1)
-                                .font(.subheadline)
+                            Text(viewModel.currentTheme.layout.label)
                                 .foregroundStyle(.secondary)
                         }
-                    }
-                }
-                .padding(.horizontal)
 
-                if viewModel.currentTheme.layout.supportsCaption {
-                    ExifStampOptionsCard(title: "표시 항목") {
-                        Toggle("제조사", isOn: viewModel.showsMakeBinding)
-                        Toggle("바디 모델", isOn: viewModel.showsModelBinding)
-                        Toggle("렌즈", isOn: viewModel.showsLensBinding)
-                        Toggle("ISO", isOn: viewModel.showsISOBinding)
-                        Toggle("셔터", isOn: viewModel.showsShutterBinding)
-                        Toggle("f값", isOn: viewModel.showsFNumberBinding)
-                        Toggle("초점거리", isOn: viewModel.showsFocalLengthBinding)
-                        Toggle("날짜", isOn: viewModel.showsDateBinding)
-
-                        if viewModel.showsDateBinding.wrappedValue {
+                        if viewModel.currentTheme.customizationSchema.allowsPaddingPreset {
                             HStack {
-                                Text("날짜 포맷")
+                                Text("패딩")
                                 Spacer()
-                                Picker("날짜 포맷", selection: viewModel.dateFormatPresetBinding) {
-                                    ForEach(ExifStampDateFormatPreset.allCases) { p in
+                                Picker("패딩", selection: viewModel.paddingPresetBinding) {
+                                    ForEach(ExifStampPaddingPreset.allCases) { p in
                                         Text(p.label).tag(p)
                                     }
                                 }
                                 .pickerStyle(.menu)
                             }
                         }
+
+                        if viewModel.currentTheme.customizationSchema.allowsAdvancedPadding {
+                            Toggle("고급 패딩", isOn: viewModel.advancedPaddingEnabledBinding)
+
+                        if viewModel.advancedPaddingEnabledBinding.wrappedValue {
+                            VStack(spacing: 10) {
+                                paddingSlider(label: "상", binding: $tempPaddingTop) { viewModel.paddingTopBinding.wrappedValue = $0 }
+                                paddingSlider(label: "하", binding: $tempPaddingBottom) { viewModel.paddingBottomBinding.wrappedValue = $0 }
+                                paddingSlider(label: "좌", binding: $tempPaddingLeft) { viewModel.paddingLeftBinding.wrappedValue = $0 }
+                                paddingSlider(label: "우", binding: $tempPaddingRight) { viewModel.paddingRightBinding.wrappedValue = $0 }
+                            }
+                            .padding(.top, 4)
+                        }
+                        }
+
+                        if viewModel.currentTheme.customizationSchema.allowsTextAlignment {
+                            HStack {
+                                Text("정렬")
+                                Spacer()
+                                Picker("정렬", selection: viewModel.textAlignmentBinding) {
+                                    ForEach(ExifStampTextAlignment.allCases) { a in
+                                        Text(a.label).tag(a)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 240)
+                            }
+                        }
+
+                        if viewModel.currentTheme.customizationSchema.allowsTextScale {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("문구 크기")
+                                    Spacer()
+                                    Text("\(Int((tempTextScale * 100).rounded()))%")
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(
+                                    value: $tempTextScale,
+                                    in: 0.8...2.2,
+                                    step: 0.05,
+                                    onEditingChanged: { editing in
+                                        if !editing {
+                                            viewModel.textScaleBinding.wrappedValue = tempTextScale
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        if let line1 = viewModel.captionLines.line1 ?? viewModel.captionLines.line2 {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("문구 미리보기")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(line1)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     .padding(.horizontal)
-                }
 
-                Spacer(minLength: 12)
+                    if viewModel.currentTheme.layout.supportsCaption {
+                        ExifStampOptionsCard(title: "표시 항목") {
+                            Toggle("제조사", isOn: viewModel.showsMakeBinding)
+                            Toggle("바디 모델", isOn: viewModel.showsModelBinding)
+                            Toggle("렌즈", isOn: viewModel.showsLensBinding)
+                            Toggle("ISO", isOn: viewModel.showsISOBinding)
+                            Toggle("셔터", isOn: viewModel.showsShutterBinding)
+                            Toggle("f값", isOn: viewModel.showsFNumberBinding)
+                            Toggle("초점거리", isOn: viewModel.showsFocalLengthBinding)
+                            Toggle("날짜", isOn: viewModel.showsDateBinding)
+
+                            if viewModel.showsDateBinding.wrappedValue {
+                                HStack {
+                                    Text("날짜 포맷")
+                                    Spacer()
+                                    Picker("날짜 포맷", selection: viewModel.dateFormatPresetBinding) {
+                                        ForEach(ExifStampDateFormatPreset.allCases) { p in
+                                            Text(p.label).tag(p)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+
+                    Spacer(minLength: 12)
+                }
+                .padding(.vertical)
             }
-            .padding(.vertical)
+            .coordinateSpace(name: "scroll")
+            .onPreferenceChange(ExifStampScrollOffsetKey.self) { offset in
+                scrollOffset = offset
+            }
+
+            // Sticky Preview Card
+            ExifStampPreviewCard(
+                image: viewModel.renderedImage,
+                isRendering: viewModel.isRendering,
+                showingFullScreen: $showingFullScreenPreview
+            )
+            .scaleEffect(previewScale, anchor: .topTrailing)
+            .opacity(previewOpacity)
+            .offset(previewOffset)
+            .frame(height: 300) // Match the placeholder height
+            .zIndex(1)
+            .allowsHitTesting(previewScale > 0.5) // 너무 작아지면 클릭 방해 방지 (필요 시)
         }
         .onAppear {
             syncTempsFromViewModel()
@@ -402,336 +514,428 @@ enum ExifStampColorPreset: String, CaseIterable, Identifiable {
 
 private struct ExifStampThemeTab: View {
     @ObservedObject var viewModel: ExifStampViewModel
+    @Binding var showingFullScreenPreview: Bool
+    
+    @State private var scrollOffset: CGFloat = 0
     @State private var showingSettingsImporter = false
 
+    private var previewScale: CGFloat {
+        if scrollOffset <= 0 { return 1.0 }
+        let scale = 1.0 - (scrollOffset / 350)
+        return max(0.25, scale)
+    }
+
+    private var previewOffset: CGSize {
+        if scrollOffset <= 0 { return .zero }
+        let x = scrollOffset * 0.5
+        let y = -scrollOffset * 0.05
+        return CGSize(width: min(x, 150), height: max(y, -40))
+    }
+
+    private var previewOpacity: Double {
+        if scrollOffset <= 50 { return 1.0 }
+        let opacity = 1.0 - (scrollOffset / 1000)
+        return max(0.7, opacity)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ExifStampPreviewCard(image: viewModel.renderedImage, isRendering: viewModel.isRendering)
+        ZStack(alignment: .top) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Placeholder
+                    Color.clear
+                        .frame(height: 300)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ExifStampScrollOffsetKey.self, value: -geo.frame(in: .named("scroll")).minY)
+                        })
 
-                ExifStampOptionsCard(title: "테마") {
-                    ForEach(ExifStampTheme.builtInThemes) { theme in
-                        Button {
-                            viewModel.selectTheme(theme.id)
-                        } label: {
+                    ExifStampOptionsCard(title: "테마") {
+                        ForEach(ExifStampTheme.builtInThemes) { theme in
+                            Button {
+                                viewModel.selectTheme(theme.id)
+                            } label: {
+                                HStack {
+                                    Text(theme.displayName)
+                                    Spacer()
+                                    if viewModel.currentTheme.id == theme.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.tint)
+                                    } else {
+                                        Image(systemName: "circle")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Divider()
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    ExifStampOptionsCard(title: "커스터마이징") {
+                        if viewModel.currentTheme.customizationSchema.allowsBackgroundColor {
                             HStack {
-                                Text(theme.displayName)
+                                Text("배경")
                                 Spacer()
-                                if viewModel.currentTheme.id == theme.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.tint)
-                                } else {
-                                    Image(systemName: "circle")
-                                        .foregroundStyle(.secondary)
+                                Picker("배경", selection: viewModel.colorPresetBinding) {
+                                    ForEach(ExifStampColorPreset.allCases) { preset in
+                                        Text(preset.label).tag(preset)
+                                    }
                                 }
+                                .pickerStyle(.segmented)
+                                .frame(width: 160)
                             }
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        Divider()
-                    }
-                }
-                .padding(.horizontal)
 
-                ExifStampOptionsCard(title: "커스터마이징") {
-                    if viewModel.currentTheme.customizationSchema.allowsBackgroundColor {
-                        HStack {
-                            Text("배경")
-                            Spacer()
-                            Picker("배경", selection: viewModel.colorPresetBinding) {
-                                ForEach(ExifStampColorPreset.allCases) { preset in
-                                    Text(preset.label).tag(preset)
-                                }
+                        HStack(spacing: 12) {
+                            Button {
+                                viewModel.resetCurrentThemeOverrides()
+                            } label: {
+                                Label("테마 리셋", systemImage: "arrow.counterclockwise")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
                             }
-                            .pickerStyle(.segmented)
-                            .frame(width: 160)
+                            .buttonStyle(.bordered)
+
+                            Button(role: .destructive) {
+                                viewModel.resetAllSettings()
+                            } label: {
+                                Label("전체 리셋", systemImage: "trash")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        HStack(spacing: 12) {
+                            Button {
+                                viewModel.shareSettingsJSON()
+                            } label: {
+                                Label("설정 내보내기", systemImage: "square.and.arrow.up")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                showingSettingsImporter = true
+                            } label: {
+                                Label("설정 가져오기", systemImage: "square.and.arrow.down")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .fileImporter(
+                        isPresented: $showingSettingsImporter,
+                        allowedContentTypes: [.json],
+                        allowsMultipleSelection: false
+                    ) { result in
+                        switch result {
+                        case .success(let urls):
+                            guard let url = urls.first else { return }
+                            viewModel.importSettingsJSON(from: url)
+                        case .failure(let error):
+                            viewModel.showImportExportError(error.localizedDescription)
                         }
                     }
 
-                    HStack(spacing: 12) {
-                        Button {
-                            viewModel.resetCurrentThemeOverrides()
-                        } label: {
-                            Label("테마 리셋", systemImage: "arrow.counterclockwise")
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button(role: .destructive) {
-                            viewModel.resetAllSettings()
-                        } label: {
-                            Label("전체 리셋", systemImage: "trash")
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    HStack(spacing: 12) {
-                        Button {
-                            viewModel.shareSettingsJSON()
-                        } label: {
-                            Label("설정 내보내기", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            showingSettingsImporter = true
-                        } label: {
-                            Label("설정 가져오기", systemImage: "square.and.arrow.down")
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                        }
-                        .buttonStyle(.bordered)
-                    }
+                    Spacer(minLength: 12)
                 }
-                .padding(.horizontal)
-                .fileImporter(
-                    isPresented: $showingSettingsImporter,
-                    allowedContentTypes: [.json],
-                    allowsMultipleSelection: false
-                ) { result in
-                    switch result {
-                    case .success(let urls):
-                        guard let url = urls.first else { return }
-                        viewModel.importSettingsJSON(from: url)
-                    case .failure(let error):
-                        viewModel.showImportExportError(error.localizedDescription)
-                    }
-                }
-
-                Spacer(minLength: 12)
+                .padding(.vertical)
             }
-            .padding(.vertical)
+            .coordinateSpace(name: "scroll")
+            .onPreferenceChange(ExifStampScrollOffsetKey.self) { offset in
+                scrollOffset = offset
+            }
+
+            // Sticky Preview Card
+            ExifStampPreviewCard(
+                image: viewModel.renderedImage,
+                isRendering: viewModel.isRendering,
+                showingFullScreen: $showingFullScreenPreview
+            )
+            .scaleEffect(previewScale, anchor: .topTrailing)
+            .opacity(previewOpacity)
+            .offset(previewOffset)
+            .frame(height: 300)
+            .zIndex(1)
+            .allowsHitTesting(previewScale > 0.5)
         }
     }
 }
 
 private struct ExifStampExportTab: View {
     @ObservedObject var viewModel: ExifStampViewModel
+    @Binding var showingFullScreenPreview: Bool
+    
+    @State private var scrollOffset: CGFloat = 0
     @State private var exportTarget: ExifStampExportTarget = .single
     @State private var showBatchResults: Bool = false
     @State private var selectedBatchPreviewIdentifier: String?
     @State private var thumbnailCache: [String: UIImage] = [:]
 
+    private var previewScale: CGFloat {
+        if scrollOffset <= 0 { return 1.0 }
+        let scale = 1.0 - (scrollOffset / 350)
+        return max(0.25, scale)
+    }
+
+    private var previewOffset: CGSize {
+        if scrollOffset <= 0 { return .zero }
+        let x = scrollOffset * 0.5
+        let y = -scrollOffset * 0.05
+        return CGSize(width: min(x, 150), height: max(y, -40))
+    }
+
+    private var previewOpacity: Double {
+        if scrollOffset <= 50 { return 1.0 }
+        let opacity = 1.0 - (scrollOffset / 1000)
+        return max(0.7, opacity)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ExifStampPreviewCard(image: viewModel.renderedImage, isRendering: viewModel.isRendering)
+        ZStack(alignment: .top) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Placeholder
+                    Color.clear
+                        .frame(height: 300)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ExifStampScrollOffsetKey.self, value: -geo.frame(in: .named("scroll")).minY)
+                        })
 
-                if exportTarget == .batch, viewModel.batchSelectionCount > 0 {
-                    batchPreviewStrip
-                        .padding(.horizontal)
-                }
-
-                ExifStampOptionsCard(title: "내보내기") {
-                    HStack {
-                        Text("내보내기 대상")
-                        Spacer()
-                        Picker("내보내기 대상", selection: $exportTarget) {
-                            ForEach(ExifStampExportTarget.allCases) { t in
-                                Text(t.label).tag(t)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 200)
-                    }
-                    .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
-
-                    if exportTarget == .batch {
-                        HStack {
-                            Text("선택된 사진")
-                            Spacer()
-                            Text("\(viewModel.batchSelectionCount)장")
-                                .foregroundStyle(.secondary)
-                        }
+                    if exportTarget == .batch, viewModel.batchSelectionCount > 0 {
+                        batchPreviewStrip
+                            .padding(.horizontal)
                     }
 
-                    if exportTarget == .batch {
+                    ExifStampOptionsCard(title: "내보내기") {
                         HStack {
-                            Text("동시 처리")
+                            Text("내보내기 대상")
                             Spacer()
-                            Picker("동시 처리", selection: viewModel.batchConcurrencyLimitBinding) {
-                                Text("1").tag(1)
-                                Text("2").tag(2)
+                            Picker("내보내기 대상", selection: $exportTarget) {
+                                ForEach(ExifStampExportTarget.allCases) { t in
+                                    Text(t.label).tag(t)
+                                }
                             }
                             .pickerStyle(.segmented)
-                            .frame(width: 140)
+                            .frame(width: 200)
                         }
-                        .disabled(viewModel.batchExportState.isRunning)
-                    }
+                        .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
 
-                    if exportTarget == .batch {
-                        Text("배치 공유는 선택된 파일들을 여러 개로 공유합니다.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("포맷")
-                        Spacer()
-                        Picker("포맷", selection: viewModel.exportFormatBinding) {
-                            ForEach(ExifStampExportFormat.allCases) { f in
-                                Text(f.label).tag(f)
+                        if exportTarget == .batch {
+                            HStack {
+                                Text("선택된 사진")
+                                Spacer()
+                                Text("\(viewModel.batchSelectionCount)장")
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        .pickerStyle(.menu)
-                    }
-                    .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(viewModel.exportFormatBinding.wrappedValue == .heic ? "HEIC 품질" : "JPEG 품질")
-                            Spacer()
-                            Text("\(Int((viewModel.jpegQualityBinding.wrappedValue * 100).rounded()))%")
+                        if exportTarget == .batch {
+                            HStack {
+                                Text("동시 처리")
+                                Spacer()
+                                Picker("동시 처리", selection: viewModel.batchConcurrencyLimitBinding) {
+                                    Text("1").tag(1)
+                                    Text("2").tag(2)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 140)
+                            }
+                            .disabled(viewModel.batchExportState.isRunning)
+                        }
+
+                        if exportTarget == .batch {
+                            Text("배치 공유는 선택된 파일들을 여러 개로 공유합니다.")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Slider(value: viewModel.jpegQualityBinding, in: 0.2...1.0, step: 0.01)
-                    }
-                    .opacity(viewModel.exportFormatBinding.wrappedValue.supportsQuality ? 1.0 : 0.35)
-                    .disabled(!viewModel.exportFormatBinding.wrappedValue.supportsQuality || (viewModel.batchExportState.isRunning && exportTarget == .batch))
 
-                    Toggle("EXIF 유지(가능한 경우)", isOn: viewModel.keepExifBinding)
-                        .disabled((exportTarget == .single && viewModel.originalImageData == nil) || (viewModel.batchExportState.isRunning && exportTarget == .batch))
-
-                    if exportTarget == .single, viewModel.originalImageData == nil {
-                        Text("이 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않습니다.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if exportTarget == .batch, viewModel.keepExifBinding.wrappedValue {
-                        Text("일부 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않을 수 있습니다.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if exportTarget == .batch, viewModel.batchExportState.isRunning {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ProgressView(value: viewModel.batchExportState.progressFraction) {
-                                Text("진행 \(viewModel.batchExportState.completed + viewModel.batchExportState.failed)/\(viewModel.batchExportState.total)")
+                        HStack {
+                            Text("포맷")
+                            Spacer()
+                            Picker("포맷", selection: viewModel.exportFormatBinding) {
+                                ForEach(ExifStampExportFormat.allCases) { f in
+                                    Text(f.label).tag(f)
+                                }
                             }
-                            .progressViewStyle(.linear)
+                            .pickerStyle(.menu)
+                        }
+                        .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
 
-                            HStack(spacing: 12) {
-                                Text("처리 중: \(max(0, viewModel.batchExportState.currentIndex))/\(viewModel.batchExportState.total)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(viewModel.exportFormatBinding.wrappedValue == .heic ? "HEIC 품질" : "JPEG 품질")
                                 Spacer()
-                                Button("취소", role: .cancel) {
-                                    viewModel.cancelBatchExport()
-                                }
+                                Text("\(Int((viewModel.jpegQualityBinding.wrappedValue * 100).rounded()))%")
+                                    .foregroundStyle(.secondary)
                             }
+                            Slider(value: viewModel.jpegQualityBinding, in: 0.2...1.0, step: 0.01)
                         }
-                        .padding(.top, 6)
-                    }
+                        .opacity(viewModel.exportFormatBinding.wrappedValue.supportsQuality ? 1.0 : 0.35)
+                        .disabled(!viewModel.exportFormatBinding.wrappedValue.supportsQuality || (viewModel.batchExportState.isRunning && exportTarget == .batch))
 
-                    if exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
-                        Text(summary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                        Toggle("EXIF 유지(가능한 경우)", isOn: viewModel.keepExifBinding)
+                            .disabled((exportTarget == .single && viewModel.originalImageData == nil) || (viewModel.batchExportState.isRunning && exportTarget == .batch))
 
-                    if exportTarget == .batch, !viewModel.batchExportState.lastFailures.isEmpty {
-                        DisclosureGroup("실패 내역 (\(viewModel.batchExportState.failed)건)") {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(Array(viewModel.batchExportState.lastFailures.enumerated()), id: \.offset) { _, line in
-                                    Text(line)
-                                        .font(.caption2)
+                        if exportTarget == .single, viewModel.originalImageData == nil {
+                            Text("이 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않습니다.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if exportTarget == .batch, viewModel.keepExifBinding.wrappedValue {
+                            Text("일부 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않을 수 있습니다.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if exportTarget == .batch, viewModel.batchExportState.isRunning {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ProgressView(value: viewModel.batchExportState.progressFraction) {
+                                    Text("진행 \(viewModel.batchExportState.completed + viewModel.batchExportState.failed)/\(viewModel.batchExportState.total)")
+                                }
+                                .progressViewStyle(.linear)
+
+                                HStack(spacing: 12) {
+                                    Text("처리 중: \(max(0, viewModel.batchExportState.currentIndex))/\(viewModel.batchExportState.total)")
+                                        .font(.caption)
                                         .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-
-                    if exportTarget == .batch, !viewModel.batchExportState.results.isEmpty {
-                        DisclosureGroup("결과 보기", isExpanded: $showBatchResults) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(viewModel.batchExportState.results) { r in
-                                    HStack(spacing: 10) {
-                                        Text(String(format: "%03d", r.index + 1))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 44, alignment: .leading)
-                                        Text(resultLabel(for: r.status))
-                                            .font(.caption)
-                                            .foregroundStyle(r.status == .failed ? .red : .secondary)
-                                        if let message = r.message, r.status == .failed {
-                                            Text(message)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                        }
-                                        Spacer()
+                                    Spacer()
+                                    Button("취소", role: .cancel) {
+                                        viewModel.cancelBatchExport()
                                     }
                                 }
                             }
                             .padding(.top, 6)
                         }
-                    }
 
-                    if exportTarget == .batch, viewModel.canRetryLastBatch, !viewModel.batchExportState.isRunning {
-                        Button("실패 항목 재시도") {
-                            viewModel.retryFailedBatch()
+                        if exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.bordered)
-                    }
 
-                    HStack(spacing: 12) {
-                        if exportTarget == .single {
-                            Button {
-                                viewModel.shareRendered()
-                            } label: {
-                                Label("공유", systemImage: "square.and.arrow.up")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 50)
+                        if exportTarget == .batch, !viewModel.batchExportState.lastFailures.isEmpty {
+                            DisclosureGroup("실패 내역 (\(viewModel.batchExportState.failed)건)") {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(Array(viewModel.batchExportState.lastFailures.enumerated()), id: \.offset) { _, line in
+                                        Text(line)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.top, 4)
+                            }
+                        }
+
+                        if exportTarget == .batch, !viewModel.batchExportState.results.isEmpty {
+                            DisclosureGroup("결과 보기", isExpanded: $showBatchResults) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(viewModel.batchExportState.results) { r in
+                                        HStack(spacing: 10) {
+                                            Text(String(format: "%03d", r.index + 1))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 44, alignment: .leading)
+                                            Text(resultLabel(for: r.status))
+                                                .font(.caption)
+                                                .foregroundStyle(r.status == .failed ? .red : .secondary)
+                                            if let message = r.message, r.status == .failed {
+                                                Text(message)
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            }
+                                            Spacer()
+                                        }
+                                    }
+                                }
+                                .padding(.top, 6)
+                            }
+                        }
+
+                        if exportTarget == .batch, viewModel.canRetryLastBatch, !viewModel.batchExportState.isRunning {
+                            Button("실패 항목 재시도") {
+                                viewModel.retryFailedBatch()
                             }
                             .buttonStyle(.bordered)
-                            .tint(.primary)
-                            .disabled(viewModel.renderedImage == nil)
+                        }
 
-                            Button {
-                                Task { await viewModel.saveRenderedToPhotos() }
-                            } label: {
-                                Label("저장", systemImage: "square.and.arrow.down")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 50)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.renderedImage == nil || viewModel.isProcessing)
-                        } else {
-                            Button {
-                                viewModel.startBatchShare()
-                            } label: {
-                                Label("공유", systemImage: "square.and.arrow.up")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 50)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.primary)
-                            .disabled(viewModel.batchSelectionCount == 0 || viewModel.batchExportState.isRunning)
+                        HStack(spacing: 12) {
+                            if exportTarget == .single {
+                                Button {
+                                    viewModel.shareRendered()
+                                } label: {
+                                    Label("공유", systemImage: "square.and.arrow.up")
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 50)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.primary)
+                                .disabled(viewModel.renderedImage == nil)
 
-                            Button {
-                                viewModel.startBatchSaveToPhotos()
-                            } label: {
-                                Label("저장", systemImage: "square.and.arrow.down")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 50)
+                                Button {
+                                    Task { await viewModel.saveRenderedToPhotos() }
+                                } label: {
+                                    Label("저장", systemImage: "square.and.arrow.down")
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 50)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(viewModel.renderedImage == nil || viewModel.isProcessing)
+                            } else {
+                                Button {
+                                    viewModel.startBatchShare()
+                                } label: {
+                                    Label("공유", systemImage: "square.and.arrow.up")
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 50)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.primary)
+                                .disabled(viewModel.batchSelectionCount == 0 || viewModel.batchExportState.isRunning)
+
+                                Button {
+                                    viewModel.startBatchSaveToPhotos()
+                                } label: {
+                                    Label("저장", systemImage: "square.and.arrow.down")
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 50)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(viewModel.batchSelectionCount == 0 || viewModel.batchExportState.isRunning)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.batchSelectionCount == 0 || viewModel.batchExportState.isRunning)
                         }
                     }
+                    .padding(.horizontal)
+
+                    Spacer(minLength: 12)
                 }
-                .padding(.horizontal)
-
-                Spacer(minLength: 12)
+                .padding(.vertical)
             }
-            .padding(.vertical)
+            .coordinateSpace(name: "scroll")
+            .onPreferenceChange(ExifStampScrollOffsetKey.self) { offset in
+                scrollOffset = offset
+            }
+
+            // Sticky Preview Card
+            ExifStampPreviewCard(
+                image: viewModel.renderedImage,
+                isRendering: viewModel.isRendering,
+                showingFullScreen: $showingFullScreenPreview
+            )
+            .scaleEffect(previewScale, anchor: .topTrailing)
+            .opacity(previewOpacity)
+            .offset(previewOffset)
+            .frame(height: 300)
+            .zIndex(1)
+            .allowsHitTesting(previewScale > 0.5)
         }
         .onAppear {
             syncSelectedBatchPreviewIfNeeded()
