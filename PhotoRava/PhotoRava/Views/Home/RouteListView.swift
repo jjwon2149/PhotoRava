@@ -11,9 +11,11 @@ import MapKit
 
 struct RouteListView: View {
     @Environment(\.modelContext) private var modelContext
+    @ObservedObject private var appState = AppState.shared
     @Query(sort: \Route.date, order: .reverse) private var routes: [Route]
     @State private var showingPhotoSelection = false
     @State private var searchText = ""
+    @State private var isTransferringAnalysis = false
     
     // 검색 필터링된 경로
     var filteredRoutes: [Route] {
@@ -57,6 +59,23 @@ struct RouteListView: View {
             }
             .sheet(isPresented: $showingPhotoSelection) {
                 PhotoSelectionView()
+            }
+            .fullScreenCover(isPresented: $isTransferringAnalysis, onDismiss: {
+                appState.pendingPhotosForAnalysis = nil
+            }) {
+                if let photos = appState.pendingPhotosForAnalysis {
+                    AnalysisProgressView(photos: photos)
+                }
+            }
+            .onChange(of: appState.pendingPhotosForAnalysis) { _, newValue in
+                if newValue != nil {
+                    isTransferringAnalysis = true
+                }
+            }
+            .onAppear {
+                if appState.pendingPhotosForAnalysis != nil {
+                    isTransferringAnalysis = true
+                }
             }
         }
     }

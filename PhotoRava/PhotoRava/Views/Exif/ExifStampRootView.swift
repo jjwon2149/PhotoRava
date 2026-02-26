@@ -53,19 +53,18 @@ struct ExifStampRootView: View {
             }
             .navigationTitle("EXIF")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    PhotosPicker(
-                        selection: $viewModel.selectedItem,
-                        matching: .images
-                    ) {
-                        Image(systemName: "photo.badge.plus")
-                    }
-                    .disabled(viewModel.isProcessing)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    PhotosPicker(
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                PhotosPicker(
+                                    selection: $viewModel.selectedItem,
+                                    matching: .images
+                                ) {
+                                    Image(systemName: "photo.badge.plus")
+                                }
+                                .disabled(viewModel.isProcessing)
+                            }
+            
+                            ToolbarItem(placement: .topBarTrailing) {                    PhotosPicker(
                         selection: $viewModel.batchSelectedItems,
                         matching: .images
                     ) {
@@ -174,7 +173,7 @@ enum ExifStampTab: Hashable {
     case export
 }
 
-private enum ExifStampExportTarget: String, CaseIterable, Identifiable {
+enum ExifStampExportTarget: String, CaseIterable, Identifiable {
     case single
     case batch
 
@@ -673,7 +672,6 @@ private struct ExifStampExportTab: View {
     @Binding var showingFullScreenPreview: Bool
     
     @State private var scrollOffset: CGFloat = 0
-    @State private var exportTarget: ExifStampExportTarget = .single
     @State private var showBatchResults: Bool = false
     @State private var selectedBatchPreviewIdentifier: String?
     @State private var thumbnailCache: [String: UIImage] = [:]
@@ -708,7 +706,7 @@ private struct ExifStampExportTab: View {
                             Color.clear.preference(key: ExifStampScrollOffsetKey.self, value: -geo.frame(in: .named("scroll")).minY)
                         })
 
-                    if exportTarget == .batch, viewModel.batchSelectionCount > 0 {
+                    if viewModel.exportTarget == .batch, viewModel.batchSelectionCount > 0 {
                         batchPreviewStrip
                             .padding(.horizontal)
                     }
@@ -717,7 +715,7 @@ private struct ExifStampExportTab: View {
                         HStack {
                             Text("내보내기 대상")
                             Spacer()
-                            Picker("내보내기 대상", selection: $exportTarget) {
+                            Picker("내보내기 대상", selection: $viewModel.exportTarget) {
                                 ForEach(ExifStampExportTarget.allCases) { t in
                                     Text(t.label).tag(t)
                                 }
@@ -725,9 +723,9 @@ private struct ExifStampExportTab: View {
                             .pickerStyle(.segmented)
                             .frame(width: 200)
                         }
-                        .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
+                        .disabled(viewModel.batchExportState.isRunning && viewModel.exportTarget == .batch)
 
-                        if exportTarget == .batch {
+                        if viewModel.exportTarget == .batch {
                             HStack {
                                 Text("선택된 사진")
                                 Spacer()
@@ -736,7 +734,7 @@ private struct ExifStampExportTab: View {
                             }
                         }
 
-                        if exportTarget == .batch {
+                        if viewModel.exportTarget == .batch {
                             HStack {
                                 Text("동시 처리")
                                 Spacer()
@@ -750,7 +748,7 @@ private struct ExifStampExportTab: View {
                             .disabled(viewModel.batchExportState.isRunning)
                         }
 
-                        if exportTarget == .batch {
+                        if viewModel.exportTarget == .batch {
                             Text("배치 공유는 선택된 파일들을 여러 개로 공유합니다.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -766,7 +764,7 @@ private struct ExifStampExportTab: View {
                             }
                             .pickerStyle(.menu)
                         }
-                        .disabled(viewModel.batchExportState.isRunning && exportTarget == .batch)
+                        .disabled(viewModel.batchExportState.isRunning && viewModel.exportTarget == .batch)
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -778,24 +776,24 @@ private struct ExifStampExportTab: View {
                             Slider(value: viewModel.jpegQualityBinding, in: 0.2...1.0, step: 0.01)
                         }
                         .opacity(viewModel.exportFormatBinding.wrappedValue.supportsQuality ? 1.0 : 0.35)
-                        .disabled(!viewModel.exportFormatBinding.wrappedValue.supportsQuality || (viewModel.batchExportState.isRunning && exportTarget == .batch))
+                        .disabled(!viewModel.exportFormatBinding.wrappedValue.supportsQuality || (viewModel.batchExportState.isRunning && viewModel.exportTarget == .batch))
 
                         Toggle("EXIF 유지(가능한 경우)", isOn: viewModel.keepExifBinding)
-                            .disabled((exportTarget == .single && viewModel.originalImageData == nil) || (viewModel.batchExportState.isRunning && exportTarget == .batch))
+                            .disabled((viewModel.exportTarget == .single && viewModel.originalImageData == nil) || (viewModel.batchExportState.isRunning && viewModel.exportTarget == .batch))
 
-                        if exportTarget == .single, viewModel.originalImageData == nil {
+                        if viewModel.exportTarget == .single, viewModel.originalImageData == nil {
                             Text("이 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않습니다.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        if exportTarget == .batch, viewModel.keepExifBinding.wrappedValue {
+                        if viewModel.exportTarget == .batch, viewModel.keepExifBinding.wrappedValue {
                             Text("일부 사진은 원본 데이터 접근이 불가해 EXIF 유지가 적용되지 않을 수 있습니다.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        if exportTarget == .batch, viewModel.batchExportState.isRunning {
+                        if viewModel.exportTarget == .batch, viewModel.batchExportState.isRunning {
                             VStack(alignment: .leading, spacing: 10) {
                                 ProgressView(value: viewModel.batchExportState.progressFraction) {
                                     Text("진행 \(viewModel.batchExportState.completed + viewModel.batchExportState.failed)/\(viewModel.batchExportState.total)")
@@ -815,13 +813,33 @@ private struct ExifStampExportTab: View {
                             .padding(.top, 6)
                         }
 
-                        if exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
-                            Text(summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        if viewModel.exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                
+                                Button {
+                                    Task {
+                                        await viewModel.preparePhotosForRouteAnalysis()
+                                    }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "map.fill")
+                                        Text("이 사진들로 경로 분석하기")
+                                    }
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                                    .background(Color.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                                .padding(.top, 4)
+                            }
                         }
 
-                        if exportTarget == .batch, !viewModel.batchExportState.lastFailures.isEmpty {
+                        if viewModel.exportTarget == .batch, !viewModel.batchExportState.lastFailures.isEmpty {
                             DisclosureGroup("실패 내역 (\(viewModel.batchExportState.failed)건)") {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ForEach(Array(viewModel.batchExportState.lastFailures.enumerated()), id: \.offset) { _, line in
@@ -834,7 +852,7 @@ private struct ExifStampExportTab: View {
                             }
                         }
 
-                        if exportTarget == .batch, !viewModel.batchExportState.results.isEmpty {
+                        if viewModel.exportTarget == .batch, !viewModel.batchExportState.results.isEmpty {
                             DisclosureGroup("결과 보기", isExpanded: $showBatchResults) {
                                 VStack(alignment: .leading, spacing: 8) {
                                     ForEach(viewModel.batchExportState.results) { r in
@@ -860,7 +878,7 @@ private struct ExifStampExportTab: View {
                             }
                         }
 
-                        if exportTarget == .batch, viewModel.canRetryLastBatch, !viewModel.batchExportState.isRunning {
+                        if viewModel.exportTarget == .batch, viewModel.canRetryLastBatch, !viewModel.batchExportState.isRunning {
                             Button("실패 항목 재시도") {
                                 viewModel.retryFailedBatch()
                             }
@@ -868,7 +886,7 @@ private struct ExifStampExportTab: View {
                         }
 
                         HStack(spacing: 12) {
-                            if exportTarget == .single {
+                            if viewModel.exportTarget == .single {
                                 Button {
                                     viewModel.shareRendered()
                                 } label: {
@@ -940,11 +958,21 @@ private struct ExifStampExportTab: View {
         .onAppear {
             syncSelectedBatchPreviewIfNeeded()
         }
-        .onChange(of: exportTarget) { _, _ in
+        .onChange(of: viewModel.exportTarget) { _, _ in
             syncSelectedBatchPreviewIfNeeded()
         }
         .onChange(of: viewModel.batchSelectionCount) { _, _ in
             syncSelectedBatchPreviewIfNeeded()
+        }
+        .alert("저장 완료", isPresented: $viewModel.showingAnalysisSuggestion) {
+            Button("나중에") { }
+            Button("경로 분석 시작") {
+                Task {
+                    await viewModel.preparePhotosForRouteAnalysis()
+                }
+            }
+        } message: {
+            Text("사진이 성공적으로 저장되었습니다. 이 사진들의 위치 정보를 사용하여 경로를 분석하시겠습니까?")
         }
     }
 
@@ -957,7 +985,7 @@ private struct ExifStampExportTab: View {
     }
 
     private func syncSelectedBatchPreviewIfNeeded() {
-        guard exportTarget == .batch else { return }
+        guard viewModel.exportTarget == .batch else { return }
         guard !viewModel.batchSources.isEmpty else {
             selectedBatchPreviewIdentifier = nil
             return
@@ -1024,15 +1052,38 @@ private struct ExifStampExportTab: View {
 
 @MainActor
 final class ExifStampViewModel: ObservableObject {
-    @Published var selectedItem: PhotosPickerItem?
+    @Published var selectedItem: PhotosPickerItem? {
+        didSet { 
+            guard let selectedItem else { return }
+            
+            // 현재 선택된 아이템이 일괄 선택 목록에 포함되어 있는지 확인
+            let isItemInBatch = batchSelectedItems.contains { $0.itemIdentifier == selectedItem.itemIdentifier }
+            
+            if !isItemInBatch {
+                // 일괄 목록에 없는 새로운 아이템을 선택한 경우 (단일 선택 모드)
+                if !batchSelectedItems.isEmpty {
+                    batchSelectedItems = [] // 기존 일괄 목록 초기화
+                }
+                exportTarget = .single
+            }
+        }
+    }
     @Published var batchSelectedItems: [PhotosPickerItem] = [] {
-        didSet { rebuildBatchSelection() }
+        didSet { 
+            rebuildBatchSelection()
+            // 여러 장이 선택되면 즉시 일괄 모드로 전환
+            if !batchSelectedItems.isEmpty {
+                exportTarget = .batch
+            }
+        }
     }
     @Published var isProcessing = false
     @Published var isRendering = false
     @Published var showingError = false
     @Published var errorMessage = ""
     @Published var batchExportState = ExifStampBatchExportState()
+    @Published var showingAnalysisSuggestion = false
+    @Published var exportTarget: ExifStampExportTarget = .single
 
     @Published private(set) var originalImage: UIImage?
     @Published private(set) var originalImageData: Data?
@@ -1130,7 +1181,10 @@ final class ExifStampViewModel: ObservableObject {
         } else {
             metadata = ExifStampMetadata(capturedAt: asset?.creationDate)
         }
-        scheduleRender()
+        // 메인 스레드에서 즉시 렌더링 호출
+        await MainActor.run {
+            self.scheduleRender()
+        }
     }
 
     private struct RenderRequest {
@@ -1476,7 +1530,9 @@ final class ExifStampViewModel: ObservableObject {
                 request.addResource(with: .photo, data: exported.data, options: options)
             } completionHandler: { success, error in
                 DispatchQueue.main.async {
-                    if !success || error != nil {
+                    if success && error == nil {
+                        self.showingAnalysisSuggestion = true
+                    } else {
                         self.showError("저장에 실패했습니다.")
                     }
                     continuation.resume()
@@ -1575,7 +1631,8 @@ final class ExifStampViewModel: ObservableObject {
         let results = sources.enumerated().map { idx, src in
             ExifStampBatchExportState.ResultItem(index: idx, identifier: src.identifier, status: .pending, message: nil, outputURL: nil)
         }
-        batchExportState = ExifStampBatchExportState(
+        
+        let initialState = ExifStampBatchExportState(
             isRunning: true,
             mode: mode,
             total: sources.count,
@@ -1587,6 +1644,8 @@ final class ExifStampViewModel: ObservableObject {
             lastFailures: [],
             results: results
         )
+        
+        batchExportState = initialState
 
         batchExportTask?.cancel()
         batchExportTask = Task { [weak self] in
@@ -1669,16 +1728,22 @@ final class ExifStampViewModel: ObservableObject {
         }
 
         let doneCount = batchExportState.completed + batchExportState.failed
-        if Task.isCancelled {
-            batchExportState.lastSummary = "취소됨: \(doneCount)/\(batchExportState.total) 처리 (실패 \(batchExportState.failed)건)"
-        } else {
-            batchExportState.lastSummary = "완료: 성공 \(batchExportState.completed)건 / 실패 \(batchExportState.failed)건"
-        }
+        
+        await MainActor.run {
+            if Task.isCancelled {
+                batchExportState.lastSummary = "취소됨: \(doneCount)/\(batchExportState.total) 처리 (실패 \(batchExportState.failed)건)"
+            } else {
+                batchExportState.lastSummary = "완료: 성공 \(batchExportState.completed)건 / 실패 \(batchExportState.failed)건"
+                if batchExportState.completed > 0 {
+                    showingAnalysisSuggestion = true
+                }
+            }
 
-        batchExportState.isRunning = false
-        batchExportState.mode = nil
-        batchExportState.currentIndex = 0
-        batchExportState.currentIdentifier = nil
+            batchExportState.isRunning = false
+            batchExportState.mode = nil
+            batchExportState.currentIndex = 0
+            batchExportState.currentIdentifier = nil
+        }
 
         if mode == .share, !Task.isCancelled {
             let urls = await urlCollector?.ordered() ?? []
@@ -1697,8 +1762,10 @@ final class ExifStampViewModel: ObservableObject {
     ) async {
         let identifier = source.identifier
         await MainActor.run {
-            self.batchExportState.currentIndex = index + 1
-            self.batchExportState.currentIdentifier = identifier
+            var newState = self.batchExportState
+            newState.currentIndex = index + 1
+            newState.currentIdentifier = identifier
+            self.batchExportState = newState
         }
 
         let originalData: Data?
@@ -1783,23 +1850,31 @@ final class ExifStampViewModel: ObservableObject {
     }
 
     private func recordBatchFailure(index: Int, identifier: String, message: String) {
-        batchExportState.failed += 1
-        if index >= 0, index < batchExportState.results.count {
-            batchExportState.results[index].status = .failed
-            batchExportState.results[index].message = message
-            batchExportState.results[index].outputURL = nil
-        }
-        if batchExportState.lastFailures.count < 10 {
-            batchExportState.lastFailures.append("\(identifier): \(message)")
+        Task { @MainActor in
+            var newState = self.batchExportState
+            newState.failed += 1
+            if index >= 0, index < newState.results.count {
+                newState.results[index].status = .failed
+                newState.results[index].message = message
+                newState.results[index].outputURL = nil
+            }
+            if newState.lastFailures.count < 10 {
+                newState.lastFailures.append("\(identifier): \(message)")
+            }
+            self.batchExportState = newState
         }
     }
 
     private func recordBatchSuccess(index: Int, outputURL: URL?) {
-        batchExportState.completed += 1
-        if index >= 0, index < batchExportState.results.count {
-            batchExportState.results[index].status = .success
-            batchExportState.results[index].message = nil
-            batchExportState.results[index].outputURL = outputURL
+        Task { @MainActor in
+            var newState = self.batchExportState
+            newState.completed += 1
+            if index >= 0, index < newState.results.count {
+                newState.results[index].status = .success
+                newState.results[index].message = nil
+                newState.results[index].outputURL = outputURL
+            }
+            self.batchExportState = newState
         }
     }
 
@@ -1917,6 +1992,64 @@ final class ExifStampViewModel: ObservableObject {
             top = presented
         }
         top.present(controller, animated: true)
+    }
+
+    func preparePhotosForRouteAnalysis() async {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        var loadedPhotos: [LoadedPhoto] = []
+        
+        if batchSources.isEmpty {
+            // 단일 사진만 있는 경우
+            if let image = originalImage, let data = originalImageData {
+                let photo = LoadedPhoto(
+                    image: image,
+                    asset: nil, // PHAsset은 identifier가 없으면 로드하기 까다로우므로 데이터 우선 사용
+                    itemIdentifier: UUID().uuidString,
+                    originalData: data
+                )
+                loadedPhotos.append(photo)
+            }
+        } else {
+            // 일괄 선택된 사진들 처리
+            for source in batchSources {
+                let asset: PHAsset?
+                let originalData: Data?
+                
+                switch source {
+                case .asset(let a):
+                    asset = a
+                    originalData = await metadataService.fetchOriginalImageData(for: a)
+                case .item(let item, _):
+                    asset = nil
+                    originalData = try? await item.loadTransferable(type: Data.self)
+                }
+                
+                let image: UIImage?
+                if let originalData, let decoded = UIImage(data: originalData) {
+                    image = decoded
+                } else if let asset {
+                    image = await fetchThumbnailImage(for: asset, targetSize: CGSize(width: 300, height: 300))
+                } else {
+                    image = nil
+                }
+                
+                if let image {
+                    let photo = LoadedPhoto(
+                        image: image,
+                        asset: asset,
+                        itemIdentifier: source.identifier,
+                        originalData: originalData
+                    )
+                    loadedPhotos.append(photo)
+                }
+            }
+        }
+        
+        if !loadedPhotos.isEmpty {
+            AppState.shared.transferToAnalysis(photos: loadedPhotos)
+        }
     }
 
     private func persistSettings() {

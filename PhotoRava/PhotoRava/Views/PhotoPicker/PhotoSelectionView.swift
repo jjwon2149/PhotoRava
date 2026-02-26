@@ -294,7 +294,7 @@ class PhotoPickerViewModel: ObservableObject {
     }
 }
 
-struct LoadedPhoto: Identifiable {
+struct LoadedPhoto: Identifiable, Equatable {
     let id = UUID()
     var image: UIImage
     var asset: PHAsset?
@@ -307,5 +307,9 @@ struct LoadedPhoto: Identifiable {
         self.asset = asset
         self.itemIdentifier = itemIdentifier
         self.originalData = originalData
+    }
+
+    static func == (lhs: LoadedPhoto, rhs: LoadedPhoto) -> Bool {
+        lhs.id == rhs.id
     }
 }

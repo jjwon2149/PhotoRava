@@ -19,22 +19,27 @@ struct PhotoRavaApp: App {
 }
 
 struct MainTabView: View {
+    @StateObject private var appState = AppState.shared
+    
     var body: some View {
-        TabView {
+        TabView(selection: $appState.selectedTab) {
             RouteListView()
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
+                .tag(AppState.Tab.home)
             
             ExifStampRootView()
                 .tabItem {
                     Label("EXIF", systemImage: "text.below.photo")
                 }
+                .tag(AppState.Tab.exif)
             
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
+                .tag(AppState.Tab.settings)
         }
     }
 }
