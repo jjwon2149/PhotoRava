@@ -251,12 +251,12 @@ struct TimelineItemView: View {
                 
                 // Info
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(locationTitle)
+                    Text(addressTitle)
                         .font(.body)
                         .fontWeight(.semibold)
                         .lineLimit(2)
                     
-                    Text(record.capturedAt.formatted(date: .omitted, time: .shortened))
+                    Text(subtitleText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     
@@ -281,25 +281,40 @@ struct TimelineItemView: View {
         .padding(.horizontal)
         .padding(.vertical, 4)
         .task {
+            // 좌표가 있다면 주소(동/구/시) 변환을 항상 시도합니다.
             if let lat = record.latitude, let lon = record.longitude {
-                if (record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                    await locationResolver.resolveIfNeeded(latitude: lat, longitude: lon)
-                }
+                await locationResolver.resolveIfNeeded(latitude: lat, longitude: lon)
             }
         }
     }
     
-    private var locationTitle: String {
-        if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines), !roadName.isEmpty {
-            return roadName
-        }
+    private var addressTitle: String {
+        // 1순위: GPS 기반 행정 주소
         if let lat = record.latitude, let lon = record.longitude {
             if let cached = locationResolver.cachedName(latitude: lat, longitude: lon) {
                 return cached
             }
+            // 아직 변환 전이라면 좌표를 보여줍니다.
             return locationResolver.fallbackCoordinateText(latitude: lat, longitude: lon)
         }
+        // 2순위: GPS가 없고 도로명만 있는 경우 (OCR 결과물)
+        if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines), !roadName.isEmpty {
+            return roadName
+        }
         return "위치 알 수 없음"
+    }
+
+    private var subtitleText: String {
+        let time = record.capturedAt.formatted(date: .omitted, time: .shortened)
+        
+        // 인식된 도로명이 있고, 그것이 제목과 중복되지 않을 때만 부제목에 추가
+        if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines), 
+           !roadName.isEmpty, 
+           roadName != addressTitle {
+            return "\(time) · \(roadName)"
+        }
+        
+        return time
     }
     
     private var dotColor: Color {
