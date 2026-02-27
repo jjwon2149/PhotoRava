@@ -289,12 +289,6 @@ private struct ExifStampCropView: View {
                         let ratio = currentRatio ?? (image.size.width / image.size.height)
                         let cropW = min(containerSize.width * 0.8, containerSize.height * 0.8 * ratio)
                         let cropH = cropW / ratio
-                        let cropRectFrame = CGRect(
-                            x: (containerSize.width - cropW) / 2,
-                            y: (containerSize.height - cropH) / 2,
-                            width: cropW,
-                            height: cropH
-                        )
                         
                         Rectangle()
                             .stroke(Color.white, lineWidth: 2)
@@ -377,9 +371,6 @@ private struct ExifStampCropView: View {
         // Center of image in container is (screenWidth/2 + offset.width, screenHeight/2 + offset.height)
         // Center of crop window is (screenWidth/2, screenHeight/2)
         // Relative to image center, crop window center is at (-offset.width, -offset.height)
-        
-        let relCenterX = (-offset.width) / (displayedSize.width / 2) // -1.0 to 1.0 if at edge
-        let relCenterY = (-offset.height) / (displayedSize.height / 2)
         
         // 5. Convert to normalized CGRect (0.0 to 1.0)
         let normCropW = cropW / displayedSize.width
@@ -478,7 +469,7 @@ private struct ExifStampOptionsCard<Content: View>: View {
 private struct ExifStampLayoutTab: View {
     @ObservedObject var viewModel: ExifStampViewModel
     @Binding var showingFullScreenPreview: Bool
-    
+
     @State private var scrollOffset: CGFloat = 0
     @State private var showingCropView: Bool = false
     @State private var tempTextScale: Double = 1.0
@@ -517,6 +508,11 @@ private struct ExifStampLayoutTab: View {
                         .background(GeometryReader { geo in
                             Color.clear.preference(key: ExifStampScrollOffsetKey.self, value: -geo.frame(in: .named("scroll")).minY)
                         })
+
+                    if viewModel.exportTarget == .batch, viewModel.batchSelectionCount > 0 {
+                        layoutBatchPreviewStrip
+                            .padding(.horizontal)
+                    }
 
                     ExifStampOptionsCard(title: "프레임/레이아웃") {
                         if let img = viewModel.originalImage {
@@ -725,6 +721,63 @@ private struct ExifStampLayoutTab: View {
         tempPaddingLeft = viewModel.paddingLeftBinding.wrappedValue
         tempPaddingRight = viewModel.paddingRightBinding.wrappedValue
     }
+
+    private var layoutBatchPreviewStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("사진 선택")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.batchSelectionCount)장")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { _, source in
+                        Button {
+                            Task { await viewModel.loadBatchPreviewSource(source) }
+                        } label: {
+                            ZStack {
+                                if let image = viewModel.thumbnailCache[source.identifier] {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color(.secondarySystemBackground))
+                                    ProgressView()
+                                }
+
+                                // 크롭 적용 배지
+                                if viewModel.hasCropApplied(for: source.identifier) {
+                                    Image(systemName: "crop")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(4)
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(Circle())
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                        .padding(4)
+                                }
+                            }
+                            .frame(width: 80, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(viewModel.activePhotoIdentifier == source.identifier ? Color.primary : Color.clear, lineWidth: 2)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .task(id: source.identifier) {
+                            _ = await viewModel.thumbnailImage(for: source)
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
 }
 
 enum ExifStampColorPreset: String, CaseIterable, Identifiable {
@@ -904,7 +957,6 @@ private struct ExifStampExportTab: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var showBatchResults: Bool = false
     @State private var selectedBatchPreviewIdentifier: String?
-    @State private var thumbnailCache: [String: UIImage] = [:]
 
     private var previewScale: CGFloat {
         if scrollOffset <= 0 { return 1.0 }
@@ -1260,7 +1312,7 @@ private struct ExifStampExportTab: View {
                             Task { await viewModel.loadBatchPreviewSource(source) }
                         } label: {
                             ZStack {
-                                if let image = thumbnailCache[source.identifier] {
+                                if let image = viewModel.thumbnailCache[source.identifier] {
                                     Image(uiImage: image)
                                         .resizable()
                                         .scaledToFill()
@@ -1268,6 +1320,17 @@ private struct ExifStampExportTab: View {
                                     RoundedRectangle(cornerRadius: 12)
                                         .fill(Color(.secondarySystemBackground))
                                     ProgressView()
+                                }
+
+                                // 크롭 적용 배지
+                                if viewModel.hasCropApplied(for: source.identifier) {
+                                    Image(systemName: "crop")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(4)
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(Circle())
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                        .padding(4)
                                 }
                             }
                             .frame(width: 92, height: 92)
@@ -1279,10 +1342,7 @@ private struct ExifStampExportTab: View {
                         }
                         .buttonStyle(.plain)
                         .task(id: source.identifier) {
-                            if thumbnailCache[source.identifier] != nil { return }
-                            if let thumb = await viewModel.thumbnailImage(for: source) {
-                                thumbnailCache[source.identifier] = thumb
-                            }
+                            _ = await viewModel.thumbnailImage(for: source)
                         }
                     }
                 }
@@ -1297,6 +1357,9 @@ final class ExifStampViewModel: ObservableObject {
     @Published var selectedItem: PhotosPickerItem? {
         didSet { 
             guard let selectedItem else { return }
+            
+            // Update active photo identifier
+            activePhotoIdentifier = selectedItem.itemIdentifier
             
             // 현재 선택된 아이템이 일괄 선택 목록에 포함되어 있는지 확인
             let isItemInBatch = batchSelectedItems.contains { $0.itemIdentifier == selectedItem.itemIdentifier }
@@ -1326,6 +1389,7 @@ final class ExifStampViewModel: ObservableObject {
     @Published var batchExportState = ExifStampBatchExportState()
     @Published var showingAnalysisSuggestion = false
     @Published var exportTarget: ExifStampExportTarget = .single
+    @Published private(set) var activePhotoIdentifier: String?
 
     @Published private(set) var originalImage: UIImage?
     @Published private(set) var originalImageData: Data?
@@ -1342,6 +1406,7 @@ final class ExifStampViewModel: ObservableObject {
     private var batchExportTask: Task<Void, Never>?
     private let batchExportQueue = DispatchQueue(label: "PhotoRava.ExifStampBatchExportQueue", qos: .userInitiated, attributes: .concurrent)
     @Published private(set) var batchSources: [BatchSource] = []
+    @Published private(set) var thumbnailCache: [String: UIImage] = [:]
     private var lastBatchSources: [BatchSource] = []
     private var lastBatchSnapshot: BatchSnapshot?
     private var lastBatchMode: ExifStampBatchExportState.Mode?
@@ -1366,6 +1431,10 @@ final class ExifStampViewModel: ObservableObject {
 
     var batchSelectionCount: Int { batchSources.count }
 
+    func hasCropApplied(for identifier: String) -> Bool {
+        userSettings.photoOverridesById[identifier]?.cropRect != nil
+    }
+
     var canRetryLastBatch: Bool {
         guard !batchExportState.isRunning else { return false }
         guard lastBatchSnapshot != nil, lastBatchMode != nil else { return false }
@@ -1374,21 +1443,33 @@ final class ExifStampViewModel: ObservableObject {
     }
 
     func thumbnailImage(for source: BatchSource) async -> UIImage? {
+        let id = source.identifier
+        if let cached = thumbnailCache[id] { return cached }
+
+        let image: UIImage?
         switch source {
         case .asset(let asset):
-            return await fetchThumbnailImage(for: asset, targetSize: CGSize(width: 600, height: 600))
+            image = await fetchThumbnailImage(for: asset, targetSize: CGSize(width: 600, height: 600))
         case .item(let item, _):
             guard let data = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else {
+                  let decoded = UIImage(data: data) else {
                 return nil
             }
-            return image
+            image = decoded
         }
+
+        if let image {
+            thumbnailCache[id] = image
+        }
+        return image
     }
 
     func loadBatchPreviewSource(_ source: BatchSource) async {
         isProcessing = true
         defer { isProcessing = false }
+
+        let id = source.identifier
+        activePhotoIdentifier = id
 
         let asset: PHAsset?
         let data: Data?
@@ -1850,6 +1931,7 @@ final class ExifStampViewModel: ObservableObject {
     private struct BatchSnapshot {
         var theme: ExifStampTheme
         var themeOverride: ExifStampThemeOverride
+        var photoOverrides: [String: ExifStampThemeOverride]
         var renderSpec: ExifStampRenderSpec
         var captionVisibility: ExifStampMetadataService.CaptionVisibility
         var dateFormatPreset: ExifStampDateFormatPreset
@@ -1860,9 +1942,13 @@ final class ExifStampViewModel: ObservableObject {
     private func makeBatchSnapshot(batchStartedAt: Date) -> BatchSnapshot {
         let theme = currentTheme
         let o = currentOverride()
+        let batchIds = Set(batchSources.map { $0.identifier })
+        let relevantOverrides = userSettings.photoOverridesById.filter { batchIds.contains($0.key) }
+        
         return BatchSnapshot(
             theme: theme,
             themeOverride: o,
+            photoOverrides: relevantOverrides,
             renderSpec: makeRenderSpec(theme: theme, override: o),
             captionVisibility: makeCaptionVisibility(theme: theme, override: o),
             dateFormatPreset: effectiveDateFormatPreset(theme: theme, override: o),
@@ -2072,7 +2158,8 @@ final class ExifStampViewModel: ObservableObject {
             baseImage: baseImage,
             originalData: originalData,
             asset: asset,
-            snapshot: snapshot
+            snapshot: snapshot,
+            identifier: identifier
         ) else {
             await MainActor.run { self.recordBatchFailure(index: index, identifier: identifier, message: "렌더/인코딩 실패") }
             return
@@ -2122,6 +2209,10 @@ final class ExifStampViewModel: ObservableObject {
             }
         }
         batchSources = sources
+
+        // 선택 해제된 항목의 썸네일 캐시 정리
+        let activeIds = Set(sources.map { $0.identifier })
+        thumbnailCache = thumbnailCache.filter { activeIds.contains($0.key) }
     }
 
     private func recordBatchFailure(index: Int, identifier: String, message: String) {
@@ -2157,7 +2248,8 @@ final class ExifStampViewModel: ObservableObject {
         baseImage: UIImage,
         originalData: Data?,
         asset: PHAsset?,
-        snapshot: BatchSnapshot
+        snapshot: BatchSnapshot,
+        identifier: String
     ) async -> ExportedData? {
         await withCheckedContinuation { continuation in
             batchExportQueue.async {
@@ -2177,11 +2269,16 @@ final class ExifStampViewModel: ObservableObject {
                         locale: .current
                     )
 
+                    var photoSpec = snapshot.renderSpec
+                    if let photoOverride = snapshot.photoOverrides[identifier], let crop = photoOverride.cropRect {
+                        photoSpec.cropRect = crop
+                    }
+
                     let rendered = StampedImageRenderer.shared.render(
                         originalImage: baseImage,
                         line1: lines.line1,
                         line2: lines.line2,
-                        spec: snapshot.renderSpec
+                        spec: photoSpec
                     )
 
                     return Self.exportData(
@@ -2333,15 +2430,40 @@ final class ExifStampViewModel: ObservableObject {
 
     private func updateOverride(_ mutate: (inout ExifStampThemeOverride) -> Void) {
         let themeId = currentTheme.id
-        var overrideValue = userSettings.themeOverridesById[themeId] ?? ExifStampThemeOverride()
-        mutate(&overrideValue)
-        userSettings.themeOverridesById[themeId] = overrideValue
+        let themeOverride = userSettings.themeOverridesById[themeId] ?? ExifStampThemeOverride()
+        
+        var nextOverride = themeOverride
+        mutate(&nextOverride)
+        
+        // If cropRect changed and there's an active photo, save it specifically for this photo
+        if nextOverride.cropRect != themeOverride.cropRect, let photoId = activePhotoIdentifier {
+            var photoOverride = userSettings.photoOverridesById[photoId] ?? ExifStampThemeOverride()
+            photoOverride.cropRect = nextOverride.cropRect
+            userSettings.photoOverridesById[photoId] = photoOverride
+            
+            // Revert the cropRect change for the theme-level override
+            nextOverride.cropRect = themeOverride.cropRect
+        }
+        
+        userSettings.themeOverridesById[themeId] = nextOverride
         persistSettings()
         scheduleRender()
     }
 
     private func currentOverride() -> ExifStampThemeOverride {
-        userSettings.themeOverridesById[currentTheme.id] ?? ExifStampThemeOverride()
+        let themeOverride = userSettings.themeOverridesById[currentTheme.id] ?? ExifStampThemeOverride()
+        
+        // Merge photo-specific overrides if they exist
+        guard let photoId = activePhotoIdentifier,
+              let photoOverride = userSettings.photoOverridesById[photoId] else {
+            return themeOverride
+        }
+        
+        var merged = themeOverride
+        if let crop = photoOverride.cropRect {
+            merged.cropRect = crop
+        }
+        return merged
     }
 
     private func effectivePaddingPreset() -> ExifStampPaddingPreset {

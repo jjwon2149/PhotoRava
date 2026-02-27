@@ -200,21 +200,25 @@ struct ExifStampExportSettings: Codable, Equatable {
 struct ExifStampUserSettings: Codable, Equatable {
     var selectedThemeId: String
     var themeOverridesById: [String: ExifStampThemeOverride]
+    var photoOverridesById: [String: ExifStampThemeOverride]
     var exportSettings: ExifStampExportSettings
 
     static let `default` = ExifStampUserSettings(
         selectedThemeId: ExifStampTheme.twoLine.id,
         themeOverridesById: [:],
+        photoOverridesById: [:],
         exportSettings: .default
     )
 
     init(
         selectedThemeId: String,
         themeOverridesById: [String: ExifStampThemeOverride],
+        photoOverridesById: [String: ExifStampThemeOverride] = [:],
         exportSettings: ExifStampExportSettings
     ) {
         self.selectedThemeId = selectedThemeId
         self.themeOverridesById = themeOverridesById
+        self.photoOverridesById = photoOverridesById
         self.exportSettings = exportSettings
     }
 
@@ -222,6 +226,7 @@ struct ExifStampUserSettings: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.selectedThemeId = try container.decodeIfPresent(String.self, forKey: .selectedThemeId) ?? ExifStampTheme.twoLine.id
         self.themeOverridesById = try container.decodeIfPresent([String: ExifStampThemeOverride].self, forKey: .themeOverridesById) ?? [:]
+        self.photoOverridesById = try container.decodeIfPresent([String: ExifStampThemeOverride].self, forKey: .photoOverridesById) ?? [:]
         self.exportSettings = try container.decodeIfPresent(ExifStampExportSettings.self, forKey: .exportSettings) ?? .default
     }
 }
