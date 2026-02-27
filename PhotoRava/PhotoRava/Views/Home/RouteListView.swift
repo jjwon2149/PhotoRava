@@ -35,18 +35,24 @@ struct RouteListView: View {
     
     var body: some View {
         NavigationStack {
-            Group {
-                if filteredRoutes.isEmpty {
-                    if searchText.isEmpty {
-                        emptyStateView
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
+                
+                Group {
+                    if filteredRoutes.isEmpty {
+                        if searchText.isEmpty {
+                            emptyStateView
+                        } else {
+                            searchEmptyStateView
+                        }
                     } else {
-                        searchEmptyStateView
+                        routeListView
                     }
-                } else {
-                    routeListView
                 }
             }
             .navigationTitle("내 경로")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "경로 이름, 도로명, 날짜로 검색")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -174,26 +180,36 @@ struct RouteListView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
             .onDelete(perform: deleteRoutes)
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
     
     private var searchEmptyStateView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 50))
-                .foregroundStyle(.secondary)
+        VStack(spacing: 24) {
+            ZStack {
+                Circle()
+                    .fill(Color.primary.opacity(0.1))
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.primary)
+            }
             
-            Text("검색 결과 없음")
-                .font(.title3)
-                .fontWeight(.semibold)
-            
-            Text("'\(searchText)'에 대한 결과를 찾을 수 없습니다")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            VStack(spacing: 8) {
+                Text("검색 결과 없음")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                
+                Text("'\(searchText)'에 대한 결과를 찾을 수 없습니다")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
@@ -242,6 +258,8 @@ struct RouteCardView: View {
         }
         .padding(12)
         .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
     }
 }
 
