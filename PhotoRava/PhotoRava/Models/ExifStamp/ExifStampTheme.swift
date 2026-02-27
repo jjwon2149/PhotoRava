@@ -82,12 +82,12 @@ struct ExifStampThemeDefaults: Codable, Equatable {
     var showsShutter: Bool
     var showsFNumber: Bool
     var showsFocalLength: Bool
-    var showsDate: Bool
-
-    var dateFormatPreset: ExifStampDateFormatPreset
-}
-
-struct ExifStampThemeCustomizationSchema: Equatable {
+        var showsDate: Bool
+        var dateFormatPreset: ExifStampDateFormatPreset
+        var canvasRatio: ExifStampCanvasRatio
+    }
+    
+    struct ExifStampThemeCustomizationSchema: Equatable {
     var allowsPaddingPreset: Bool
     var allowsAdvancedPadding: Bool
     var allowsBackgroundColor: Bool
@@ -114,7 +114,7 @@ extension ExifStampTheme {
             backgroundColorHex: "#FFFFFFFF",
             textColorHex: "#000000FF",
             textAlignment: .center,
-            textScale: 1.25,
+            textScale: 1.0,
             showsMake: true,
             showsModel: true,
             showsLens: true,
@@ -123,7 +123,8 @@ extension ExifStampTheme {
             showsFNumber: true,
             showsFocalLength: true,
             showsDate: true,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: true,
@@ -144,7 +145,7 @@ extension ExifStampTheme {
             backgroundColorHex: "#FFFFFFFF",
             textColorHex: "#000000FF",
             textAlignment: .center,
-            textScale: 1.15,
+            textScale: 1.0,
             showsMake: true,
             showsModel: true,
             showsLens: true,
@@ -153,7 +154,8 @@ extension ExifStampTheme {
             showsFNumber: true,
             showsFocalLength: true,
             showsDate: true,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: true,
@@ -183,7 +185,8 @@ extension ExifStampTheme {
             showsFNumber: false,
             showsFocalLength: false,
             showsDate: false,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: true,
@@ -213,7 +216,8 @@ extension ExifStampTheme {
             showsFNumber: false,
             showsFocalLength: false,
             showsDate: false,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: false,
@@ -234,7 +238,7 @@ extension ExifStampTheme {
             backgroundColorHex: "#FFFFFFFF",
             textColorHex: "#000000FF",
             textAlignment: .center,
-            textScale: 1.15,
+            textScale: 1.0,
             showsMake: true,
             showsModel: true,
             showsLens: true,
@@ -243,7 +247,8 @@ extension ExifStampTheme {
             showsFNumber: true,
             showsFocalLength: true,
             showsDate: true,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: true,
@@ -264,7 +269,7 @@ extension ExifStampTheme {
             backgroundColorHex: "#F5F1E9FF",
             textColorHex: "#1A1A1AFF",
             textAlignment: .center,
-            textScale: 1.05,
+            textScale: 1.0,
             showsMake: true,
             showsModel: true,
             showsLens: true,
@@ -273,7 +278,8 @@ extension ExifStampTheme {
             showsFNumber: true,
             showsFocalLength: true,
             showsDate: true,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: true,
@@ -294,7 +300,7 @@ extension ExifStampTheme {
             backgroundColorHex: "#0B0B0BFF",
             textColorHex: "#F2F2F2FF",
             textAlignment: .center,
-            textScale: 1.10,
+            textScale: 1.0,
             showsMake: true,
             showsModel: true,
             showsLens: true,
@@ -303,7 +309,8 @@ extension ExifStampTheme {
             showsFNumber: true,
             showsFocalLength: true,
             showsDate: true,
-            dateFormatPreset: .locale
+            dateFormatPreset: .locale,
+            canvasRatio: .original
         ),
         customizationSchema: ExifStampThemeCustomizationSchema(
             allowsPaddingPreset: true,

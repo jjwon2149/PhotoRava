@@ -64,6 +64,66 @@ enum ExifStampExportFormat: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ExifStampExportSize: String, Codable, CaseIterable, Identifiable {
+    case original
+    case large // 2048px
+    case medium // 1080px
+    case small // 720px
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .original: return "원본"
+        case .large: return "대형 (2048px)"
+        case .medium: return "중형 (1080px)"
+        case .small: return "소형 (720px)"
+        }
+    }
+
+    func targetLongSide(original: CGFloat) -> CGFloat? {
+        switch self {
+        case .original: return nil
+        case .large: return 2048
+        case .medium: return 1080
+        case .small: return 720
+        }
+    }
+}
+
+enum ExifStampCanvasRatio: String, Codable, CaseIterable, Identifiable {
+    case original
+    case square // 1:1
+    case portrait4_5 // 4:5
+    case portrait2_3 // 2:3
+    case landscape3_2 // 3:2
+    case landscape16_9 // 16:9
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .original: return "원본 비율"
+        case .square: return "1:1 (정사각형)"
+        case .portrait4_5: return "4:5 (인스타 세로)"
+        case .portrait2_3: return "2:3"
+        case .landscape3_2: return "3:2"
+        case .landscape16_9: return "16:9"
+        }
+    }
+
+    func ratio(originalSize: CGSize) -> CGFloat? {
+        switch self {
+        case .original: return nil
+        case .square: return 1.0
+        case .portrait4_5: return 4.0/5.0
+        case .portrait2_3: return 2.0/3.0
+        case .landscape3_2: return 3.0/2.0
+        case .landscape16_9: return 16.0/9.0
+        }
+    }
+}
+
 struct ExifStampThemeOverride: Codable, Equatable {
     var paddingPreset: ExifStampPaddingPreset? = nil
 
@@ -90,6 +150,11 @@ struct ExifStampThemeOverride: Codable, Equatable {
     var showsDate: Bool? = nil
 
     var dateFormatPreset: ExifStampDateFormatPreset? = nil
+    
+    /// Normalized crop rect (0.0 to 1.0). nil means no crop.
+    var cropRect: CGRect? = nil
+    
+    var canvasRatio: ExifStampCanvasRatio? = nil
 }
 
 struct ExifStampExportSettings: Codable, Equatable {
@@ -98,24 +163,28 @@ struct ExifStampExportSettings: Codable, Equatable {
     var keepExif: Bool
     /// Batch export concurrency limit. Default is 1 to avoid OOM.
     var batchConcurrencyLimit: Int
+    var exportSize: ExifStampExportSize
 
     static let `default` = ExifStampExportSettings(
         format: .jpeg,
         jpegQuality: 0.9,
         keepExif: false,
-        batchConcurrencyLimit: 1
+        batchConcurrencyLimit: 1,
+        exportSize: .original
     )
 
     init(
         format: ExifStampExportFormat = .jpeg,
         jpegQuality: Double = 0.9,
         keepExif: Bool = false,
-        batchConcurrencyLimit: Int = 1
+        batchConcurrencyLimit: Int = 1,
+        exportSize: ExifStampExportSize = .original
     ) {
         self.format = format
         self.jpegQuality = jpegQuality
         self.keepExif = keepExif
         self.batchConcurrencyLimit = batchConcurrencyLimit
+        self.exportSize = exportSize
     }
 
     init(from decoder: any Decoder) throws {
@@ -124,6 +193,7 @@ struct ExifStampExportSettings: Codable, Equatable {
         self.jpegQuality = try container.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? 0.9
         self.keepExif = try container.decodeIfPresent(Bool.self, forKey: .keepExif) ?? false
         self.batchConcurrencyLimit = try container.decodeIfPresent(Int.self, forKey: .batchConcurrencyLimit) ?? 1
+        self.exportSize = try container.decodeIfPresent(ExifStampExportSize.self, forKey: .exportSize) ?? .original
     }
 }
 

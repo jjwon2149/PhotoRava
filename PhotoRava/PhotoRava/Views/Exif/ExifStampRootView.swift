@@ -122,48 +122,59 @@ struct ExifStampRootView: View {
     }
     
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "text.below.photo")
-                .font(.system(size: 56))
-                .foregroundStyle(.secondary)
-            
-            Text("EXIF 문구 새기기")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            Text("사진에 패딩을 추가하고\n카메라/노출 정보 등을 하단에 새깁니다.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            
-            PhotosPicker(
-                selection: $viewModel.selectedItem,
-                matching: .images
-            ) {
-                Text("사진 선택")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(width: 200, height: 50)
-                    .background(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .disabled(viewModel.isProcessing)
-
-            PhotosPicker(
-                selection: $viewModel.batchSelectedItems,
-                matching: .images
-            ) {
-                Text("여러 장 선택")
-                    .font(.headline)
+        VStack(spacing: 24) {
+            ZStack {
+                Circle()
+                    .fill(Color.primary.opacity(0.1))
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: "text.below.photo")
+                    .font(.system(size: 50))
                     .foregroundStyle(.primary)
-                    .frame(width: 200, height: 50)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
+            
+            VStack(spacing: 8) {
+                Text("EXIF 문구 새기기")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text("사진에 패딩을 추가하고\n카메라/노출 정보 등을 하단에 새깁니다.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+            }
+            
+            VStack(spacing: 12) {
+                PhotosPicker(
+                    selection: $viewModel.selectedItem,
+                    matching: .images
+                ) {
+                    Text("사진 선택")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 200, height: 50)
+                        .background(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(viewModel.isProcessing)
+
+                PhotosPicker(
+                    selection: $viewModel.batchSelectedItems,
+                    matching: .images
+                ) {
+                    Text("여러 장 선택")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .frame(width: 200, height: 50)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -219,6 +230,187 @@ private struct ExifStampFullScreenPreview: View {
     }
 }
 
+private struct ExifStampCropView: View {
+    let image: UIImage
+    @Binding var cropRect: CGRect?
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var offset: CGSize = .zero
+    @State private var scale: CGFloat = 1.0
+    @State private var lastOffset: CGSize = .zero
+    @State private var lastScale: CGFloat = 1.0
+    
+    // Ratios: Width / Height
+    @State private var currentRatio: CGFloat? = nil
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    
+                    GeometryReader { geo in
+                        let containerSize = geo.size
+                        
+                        // Main Image
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .scaleEffect(scale)
+                            .offset(offset)
+                            .background(GeometryReader { imgGeo in
+                                Color.clear.onAppear {
+                                    // Could store image intrinsic layout if needed
+                                }
+                            })
+                            .gesture(
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        scale = lastScale * value
+                                    }
+                                    .onEnded { _ in
+                                        lastScale = scale
+                                    }
+                            )
+                            .simultaneousGesture(
+                                DragGesture()
+                                    .onChanged { value in
+                                        offset = CGSize(
+                                            width: lastOffset.width + value.translation.width,
+                                            height: lastOffset.height + value.translation.height
+                                        )
+                                    }
+                                    .onEnded { _ in
+                                        lastOffset = offset
+                                    }
+                            )
+                        
+                        // Crop Window (Overlay)
+                        let ratio = currentRatio ?? (image.size.width / image.size.height)
+                        let cropW = min(containerSize.width * 0.8, containerSize.height * 0.8 * ratio)
+                        let cropH = cropW / ratio
+                        let cropRectFrame = CGRect(
+                            x: (containerSize.width - cropW) / 2,
+                            y: (containerSize.height - cropH) / 2,
+                            width: cropW,
+                            height: cropH
+                        )
+                        
+                        Rectangle()
+                            .stroke(Color.white, lineWidth: 2)
+                            .frame(width: cropW, height: cropH)
+                            .position(x: containerSize.width / 2, y: containerSize.height / 2)
+                            .shadow(color: .black.opacity(0.5), radius: 10)
+                            .allowsHitTesting(false)
+                        
+                        // Instruction
+                        VStack {
+                            Spacer()
+                            Text("두 손가락으로 확대하고 드래그하여 맞추세요")
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .background(.black.opacity(0.6))
+                                .clipShape(Capsule())
+                                .padding(.bottom, 20)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                
+                // Aspect Ratio Selector
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 15) {
+                        RatioButton(label: "원본", current: $currentRatio, ratio: nil)
+                        RatioButton(label: "1:1", current: $currentRatio, ratio: 1.0)
+                        RatioButton(label: "4:5", current: $currentRatio, ratio: 4.0/5.0)
+                        RatioButton(label: "5:4", current: $currentRatio, ratio: 5.0/4.0)
+                        RatioButton(label: "3:2", current: $currentRatio, ratio: 3.0/2.0)
+                        RatioButton(label: "16:9", current: $currentRatio, ratio: 16.0/9.0)
+                    }
+                    .padding()
+                }
+                .background(Color(.systemBackground))
+            }
+            .navigationTitle("이미지 자르기")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("취소") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("완료") {
+                        calculateAndApplyCrop(imageSize: image.size)
+                        dismiss()
+                    }
+                    .fontWeight(.bold)
+                }
+            }
+        }
+    }
+    
+    private func calculateAndApplyCrop(imageSize: CGSize) {
+        // We need the container size to do the math. 
+        // For simplicity in this implementation, we use a fixed estimation or 
+        // ideally we would have captured the GeometryProxy.
+        // Let's use a standard screen-based estimation for now:
+        let screenWidth = UIScreen.main.bounds.width
+        let screenHeight = UIScreen.main.bounds.height - 200 // Approx container height
+        
+        let containerSize = CGSize(width: screenWidth, height: screenHeight)
+        
+        // 1. Calculate the base fitted size of the image in the container (scaledToFit)
+        let hRatio = containerSize.width / imageSize.width
+        let vRatio = containerSize.height / imageSize.height
+        let baseFitRatio = min(hRatio, vRatio)
+        let fittedSize = CGSize(width: imageSize.width * baseFitRatio, height: imageSize.height * baseFitRatio)
+        
+        // 2. Current displayed size after scale
+        let displayedSize = CGSize(width: fittedSize.width * scale, height: fittedSize.height * scale)
+        
+        // 3. Crop Window Size
+        let ratio = currentRatio ?? (imageSize.width / imageSize.height)
+        let cropW = min(containerSize.width * 0.8, containerSize.height * 0.8 * ratio)
+        let cropH = cropW / ratio
+        
+        // 4. Calculate relative offset of the crop window from the image center
+        // Center of image in container is (screenWidth/2 + offset.width, screenHeight/2 + offset.height)
+        // Center of crop window is (screenWidth/2, screenHeight/2)
+        // Relative to image center, crop window center is at (-offset.width, -offset.height)
+        
+        let relCenterX = (-offset.width) / (displayedSize.width / 2) // -1.0 to 1.0 if at edge
+        let relCenterY = (-offset.height) / (displayedSize.height / 2)
+        
+        // 5. Convert to normalized CGRect (0.0 to 1.0)
+        let normCropW = cropW / displayedSize.width
+        let normCropH = cropH / displayedSize.height
+        
+        let normX = (1.0 - normCropW) / 2 - (offset.width / displayedSize.width)
+        let normY = (1.0 - normCropH) / 2 - (offset.height / displayedSize.height)
+        
+        cropRect = CGRect(x: normX, y: normY, width: normCropW, height: normCropH)
+    }
+    
+    struct RatioButton: View {
+        let label: String
+        @Binding var current: CGFloat?
+        let ratio: CGFloat?
+        
+        var body: some View {
+            Button {
+                current = ratio
+            } label: {
+                Text(label)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(current == ratio ? Color.accentColor : Color(.secondarySystemBackground))
+                    .foregroundStyle(current == ratio ? .white : .primary)
+                    .clipShape(Capsule())
+            }
+        }
+    }
+}
+
 private struct ExifStampPreviewCard: View {
     let image: UIImage?
     let isRendering: Bool
@@ -235,9 +427,9 @@ private struct ExifStampPreviewCard: View {
                         .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
                 } else {
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(Color(.systemBackground))
                         .frame(height: 240)
-                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
                 }
             }
 
@@ -277,8 +469,9 @@ private struct ExifStampOptionsCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -287,7 +480,8 @@ private struct ExifStampLayoutTab: View {
     @Binding var showingFullScreenPreview: Bool
     
     @State private var scrollOffset: CGFloat = 0
-    @State private var tempTextScale: Double = 1.25
+    @State private var showingCropView: Bool = false
+    @State private var tempTextScale: Double = 1.0
     @State private var tempPaddingTop: Double = 0
     @State private var tempPaddingBottom: Double = 0
     @State private var tempPaddingLeft: Double = 0
@@ -325,11 +519,47 @@ private struct ExifStampLayoutTab: View {
                         })
 
                     ExifStampOptionsCard(title: "프레임/레이아웃") {
+                        if let img = viewModel.originalImage {
+                            Button {
+                                showingCropView = true
+                            } label: {
+                                Label(viewModel.cropRectBinding.wrappedValue == nil ? "이미지 자르기" : "자르기 수정 (이미 적용됨)", systemImage: "crop")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(viewModel.cropRectBinding.wrappedValue == nil ? .accentColor : .green)
+                            .sheet(isPresented: $showingCropView) {
+                                ExifStampCropView(image: img, cropRect: viewModel.cropRectBinding)
+                            }
+                            
+                            if viewModel.cropRectBinding.wrappedValue != nil {
+                                Button(role: .destructive) {
+                                    viewModel.cropRectBinding.wrappedValue = nil
+                                } label: {
+                                    Text("자르기 초기화")
+                                        .font(.caption)
+                                }
+                                .padding(.top, -8)
+                            }
+                        }
+
                         HStack {
                             Text("레이아웃")
                             Spacer()
                             Text(viewModel.currentTheme.layout.label)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        HStack {
+                            Text("최종 비율 (캔버스)")
+                            Spacer()
+                            Picker("최종 비율", selection: viewModel.canvasRatioBinding) {
+                                ForEach(ExifStampCanvasRatio.allCases) { ratio in
+                                    Text(ratio.label).tag(ratio)
+                                }
+                            }
+                            .pickerStyle(.menu)
                         }
 
                         if viewModel.currentTheme.customizationSchema.allowsPaddingPreset {
@@ -383,7 +613,7 @@ private struct ExifStampLayoutTab: View {
                                 }
                                 Slider(
                                     value: $tempTextScale,
-                                    in: 0.8...2.2,
+                                    in: 0.0...2.0,
                                     step: 0.05,
                                     onEditingChanged: { editing in
                                         if !editing {
@@ -792,6 +1022,18 @@ private struct ExifStampExportTab: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        HStack {
+                            Text("출력 해상도")
+                            Spacer()
+                            Picker("출력 해상도", selection: viewModel.exportSizeBinding) {
+                                ForEach(ExifStampExportSize.allCases) { size in
+                                    Text(size.label).tag(size)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        .disabled(viewModel.batchExportState.isRunning && viewModel.exportTarget == .batch)
 
                         if viewModel.exportTarget == .batch, viewModel.batchExportState.isRunning {
                             VStack(alignment: .leading, spacing: 10) {
@@ -1290,7 +1532,7 @@ final class ExifStampViewModel: ObservableObject {
 
     var textScaleBinding: Binding<Double> {
         Binding(
-            get: { [weak self] in self?.effectiveTextScale() ?? 1.25 },
+            get: { [weak self] in self?.effectiveTextScale() ?? 1.0 },
             set: { [weak self] newValue in
                 self?.updateOverride { $0.textScale = newValue }
             }
@@ -1329,6 +1571,39 @@ final class ExifStampViewModel: ObservableObject {
                 guard let self else { return }
                 self.userSettings.exportSettings.jpegQuality = newValue
                 self.persistSettings()
+            }
+        )
+    }
+
+    var exportSizeBinding: Binding<ExifStampExportSize> {
+        Binding(
+            get: { [weak self] in self?.userSettings.exportSettings.exportSize ?? .original },
+            set: { [weak self] newValue in
+                guard let self else { return }
+                self.userSettings.exportSettings.exportSize = newValue
+                self.persistSettings()
+                self.scheduleRender()
+            }
+        )
+    }
+
+    var cropRectBinding: Binding<CGRect?> {
+        Binding(
+            get: { [weak self] in self?.currentOverride().cropRect },
+            set: { [weak self] newValue in
+                self?.updateOverride { $0.cropRect = newValue }
+            }
+        )
+    }
+
+    var canvasRatioBinding: Binding<ExifStampCanvasRatio> {
+        Binding(
+            get: { [weak self] in
+                guard let self else { return .original }
+                return self.currentOverride().canvasRatio ?? self.currentTheme.defaults.canvasRatio
+            },
+            set: { [weak self] newValue in
+                self?.updateOverride { $0.canvasRatio = newValue }
             }
         )
     }
@@ -2137,7 +2412,10 @@ final class ExifStampViewModel: ObservableObject {
             backgroundColor: bg,
             textColor: text,
             textAlignment: alignment,
-            textScale: CGFloat(scale)
+            textScale: CGFloat(scale),
+            cropRect: o.cropRect,
+            exportSize: userSettings.exportSettings.exportSize,
+            canvasRatio: o.canvasRatio ?? theme.defaults.canvasRatio
         )
     }
 

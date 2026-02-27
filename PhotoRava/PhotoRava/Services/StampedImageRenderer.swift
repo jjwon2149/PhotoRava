@@ -46,6 +46,15 @@ struct ExifStampRenderSpec: Equatable {
     var textAlignment: ExifStampTextAlignment
     /// Multiplier for caption font sizes (user-controlled).
     var textScale: CGFloat
+    
+    /// Normalized crop rect (0.0 to 1.0). nil means no crop.
+    var cropRect: CGRect? = nil
+    
+    /// Target export size.
+    var exportSize: ExifStampExportSize = .original
+    
+    /// Target final frame (canvas) ratio.
+    var canvasRatio: ExifStampCanvasRatio = .original
 }
 
 final class StampedImageRenderer {
@@ -58,7 +67,13 @@ final class StampedImageRenderer {
         line2: String?,
         spec: ExifStampRenderSpec
     ) -> UIImage {
-        let base = originalImage.normalizedOrientation()
+        var base = originalImage.normalizedOrientation()
+        
+        // Apply Crop if specified
+        if let cropRect = spec.cropRect {
+            base = base.cropped(to: cropRect)
+        }
+        
         let originalSize = base.size
         
         let shortestSide = min(originalSize.width, originalSize.height)
@@ -74,31 +89,51 @@ final class StampedImageRenderer {
             line2: line2,
             maxWidth: maxTextWidth,
             spec: spec,
-            referenceWidth: originalSize.width
+            referenceWidth: shortestSide
         ) : (.zero, nil)
 
-        let captionPaddingTop = (textBlockSize.height > 0) ? (bottomBasePadding * 0.8) : 0
-        let captionPaddingBottom = (textBlockSize.height > 0) ? (bottomBasePadding * 0.9) : 0
-        let bottomPadding = bottomBasePadding + captionPaddingTop + textBlockSize.height + captionPaddingBottom
+        // New Logic: Bottom padding is the sum of gap, text, and the base margin.
+        // This ensures the space from the text to the bottom edge matches topPadding.
+        let captionGap = (textBlockSize.height > 0) ? (bottomBasePadding * 0.6) : 0
+        let bottomPadding = (textBlockSize.height > 0) 
+            ? (captionGap + textBlockSize.height + bottomBasePadding) 
+            : bottomBasePadding
         
-        let canvasSize = CGSize(
+        var canvasSize = CGSize(
             width: originalSize.width + leftPadding + rightPadding,
             height: originalSize.height + topPadding + bottomPadding
         )
+        
+        // Handle Final Canvas Ratio with symmetry compensation
+        var finalImageOffset = CGPoint.zero
+        if let targetRatio = spec.canvasRatio.ratio(originalSize: canvasSize) {
+            let currentRatio = canvasSize.width / canvasSize.height
+            if currentRatio > targetRatio {
+                // Canvas is too wide, need more height
+                let newHeight = canvasSize.width / targetRatio
+                finalImageOffset.y = (newHeight - canvasSize.height) / 2
+                canvasSize.height = newHeight
+            } else if currentRatio < targetRatio {
+                // Canvas is too tall, need more width
+                let newWidth = canvasSize.height * targetRatio
+                finalImageOffset.x = (newWidth - canvasSize.width) / 2
+                canvasSize.width = newWidth
+            }
+        }
         
         let format = UIGraphicsImageRendererFormat.default()
         format.opaque = true
         format.scale = base.scale
         
         let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
-        return renderer.image { ctx in
+        let stampedImage = renderer.image { ctx in
             let cg = ctx.cgContext
             cg.setFillColor(spec.backgroundColor.cgColor)
             cg.fill(CGRect(origin: .zero, size: canvasSize))
             
             let imageRect = CGRect(
-                x: leftPadding,
-                y: topPadding,
+                x: leftPadding + finalImageOffset.x,
+                y: topPadding + finalImageOffset.y,
                 width: originalSize.width,
                 height: originalSize.height
             )
@@ -106,14 +141,25 @@ final class StampedImageRenderer {
             
             guard textBlockSize.height > 0, let attributedText else { return }
             
+            // Text is placed exactly 'captionGap' below the image
             let textRect = CGRect(
-                x: 0,
-                y: imageRect.maxY + captionPaddingTop,
-                width: canvasSize.width,
+                x: finalImageOffset.x,
+                y: imageRect.maxY + captionGap,
+                width: canvasSize.width - (finalImageOffset.x * 2),
                 height: textBlockSize.height
             )
             attributedText.draw(in: textRect.inset(by: UIEdgeInsets(top: 0, left: leftPadding, bottom: 0, right: rightPadding)))
         }
+        
+        // Apply final resize if requested
+        if let targetSize = spec.exportSize.targetLongSide(original: max(canvasSize.width, canvasSize.height)) {
+            let currentLongSide = max(canvasSize.width, canvasSize.height)
+            if currentLongSide > targetSize {
+                return stampedImage.resized(toLongSide: targetSize)
+            }
+        }
+        
+        return stampedImage
     }
     
     private func buildText(
@@ -128,10 +174,10 @@ final class StampedImageRenderer {
         let hasAny = !l1.isEmpty || !l2.isEmpty
         guard hasAny else { return (.zero, nil) }
         
-        let scale = max(0.7, min(2.5, spec.textScale))
-        let baseFontSize = max(30, min(90, referenceWidth * 0.060)) * scale
+        let scale = max(0.1, min(2.5, spec.textScale))
+        let baseFontSize = (referenceWidth * 0.055) * scale
         let line1Font = UIFont.systemFont(ofSize: baseFontSize, weight: .semibold)
-        let line2Font = UIFont.systemFont(ofSize: max(14, baseFontSize * 0.80), weight: .regular)
+        let line2Font = UIFont.systemFont(ofSize: baseFontSize * 0.80, weight: .regular)
         
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = spec.textAlignment.nsAlignment
@@ -179,6 +225,33 @@ private extension UIImage {
         format.opaque = false
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+    
+    func cropped(to rect: CGRect) -> UIImage {
+        let normalizedRect = CGRect(
+            x: rect.origin.x * size.width,
+            y: rect.origin.y * size.height,
+            width: rect.size.width * size.width,
+            height: rect.size.height * size.height
+        )
+        guard let cgImage = cgImage?.cropping(to: normalizedRect) else { return self }
+        return UIImage(cgImage: cgImage, scale: scale, orientation: imageOrientation)
+    }
+    
+    func resized(toLongSide maxSide: CGFloat) -> UIImage {
+        let aspect = size.width / size.height
+        let newSize: CGSize
+        if size.width > size.height {
+            newSize = CGSize(width: maxSide, height: maxSide / aspect)
+        } else {
+            newSize = CGSize(width: maxSide * aspect, height: maxSide)
+        }
+        
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = scale
+        return UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
 }
