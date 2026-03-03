@@ -11,17 +11,22 @@ import UIKit
 enum RouteSnapshotRenderer {
     static func renderSnapshot(
         route: Route,
+        pathCoordinates: [CLLocationCoordinate2D]? = nil,
         size: CGSize,
         scale: CGFloat,
         lineWidth: CGFloat = 6,
         lineColor: UIColor = UIColor.systemBlue.withAlphaComponent(0.95)
     ) async throws -> UIImage {
-        guard let coordinatesData = route.coordinatesData,
-              let stored = try? JSONDecoder().decode([StoredCoordinate].self, from: coordinatesData) else {
+        let coordinates: [CLLocationCoordinate2D]
+        if let pathCoordinates, !pathCoordinates.isEmpty {
+            coordinates = pathCoordinates
+        } else if let coordinatesData = route.coordinatesData,
+                  let stored = try? JSONDecoder().decode([StoredCoordinate].self, from: coordinatesData) {
+            coordinates = stored.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+        } else {
             throw RouteSnapshotError.missingCoordinates
         }
 
-        let coordinates = stored.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
         guard !coordinates.isEmpty else {
             throw RouteSnapshotError.missingCoordinates
         }
@@ -123,4 +128,3 @@ enum RouteSnapshotRenderer {
 enum RouteSnapshotError: Error {
     case missingCoordinates
 }
-

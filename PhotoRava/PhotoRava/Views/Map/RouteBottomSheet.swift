@@ -135,8 +135,10 @@ struct RouteBottomSheet: View {
     }
     
     private func makeSnapshotImage() async throws -> UIImage {
-        try await RouteSnapshotRenderer.renderSnapshot(
+        let displayCoordinates = viewModel.routedCoordinates.isEmpty ? viewModel.coordinates : viewModel.routedCoordinates
+        return try await RouteSnapshotRenderer.renderSnapshot(
             route: viewModel.route,
+            pathCoordinates: displayCoordinates,
             size: CGSize(width: 1600, height: 1600),
             scale: UIScreen.main.scale,
             lineWidth: 10
