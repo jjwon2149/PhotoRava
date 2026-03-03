@@ -173,10 +173,15 @@ struct RouteListView: View {
     private var routeListView: some View {
         List {
             ForEach(filteredRoutes) { route in
-                NavigationLink {
-                    TimelineDetailView(route: route)
-                } label: {
+                ZStack {
                     RouteCardView(route: route)
+                    
+                    NavigationLink {
+                        TimelineDetailView(route: route)
+                    } label: {
+                        EmptyView()
+                    }
+                    .opacity(0)
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowSeparator(.hidden)
@@ -257,6 +262,7 @@ struct RouteCardView: View {
             }
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)

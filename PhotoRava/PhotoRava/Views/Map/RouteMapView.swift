@@ -25,9 +25,10 @@ struct RouteMapView: View {
         ZStack {
             // Full screen map
             Map(position: $viewModel.cameraPosition) {
-                // Route polyline
-                if !viewModel.coordinates.isEmpty {
-                    MapPolyline(coordinates: viewModel.coordinates)
+                // Route polyline (도로 경로 우선, 없으면 직선 fallback)
+                let displayCoords = viewModel.routedCoordinates.isEmpty ? viewModel.coordinates : viewModel.routedCoordinates
+                if !displayCoords.isEmpty {
+                    MapPolyline(coordinates: displayCoords)
                         .stroke(.blue, lineWidth: 4)
                 }
                 
@@ -112,6 +113,7 @@ struct RouteMapView: View {
         }
         .onAppear {
             viewModel.showingBottomSheet = true
+            Task { await viewModel.fetchRoutedPath() }
         }
     }
 }
@@ -121,6 +123,8 @@ class RouteMapViewModel: ObservableObject {
     let route: Route
     @Published var cameraPosition: MapCameraPosition
     @Published var coordinates: [CLLocationCoordinate2D] = []
+    @Published var routedCoordinates: [CLLocationCoordinate2D] = []
+    @Published var isRouting = false
     @Published var photoAnnotations: [PhotoAnnotation] = []
     @Published var photoThumbnails: [UUID: UIImage] = [:]
     @Published var selectedPhotoIndex: Int?
@@ -205,6 +209,47 @@ class RouteMapViewModel: ObservableObject {
         )
     }
     
+    func fetchRoutedPath() async {
+        let sorted = photoAnnotations.sorted { $0.timestamp < $1.timestamp }
+        guard sorted.count >= 2 else { return }
+
+        isRouting = true
+        defer { isRouting = false }
+
+        var result: [CLLocationCoordinate2D] = []
+
+        for i in 0..<(sorted.count - 1) {
+            let from = sorted[i].coordinate
+            let to = sorted[i + 1].coordinate
+
+            let request = MKDirections.Request()
+            request.source = MKMapItem(placemark: MKPlacemark(coordinate: from))
+            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: to))
+            request.transportType = .automobile
+
+            do {
+                let directions = MKDirections(request: request)
+                let response = try await directions.calculate()
+                if let route = response.routes.first {
+                    let pts = route.polyline.points()
+                    for j in 0..<route.polyline.pointCount {
+                        result.append(pts[j].coordinate)
+                    }
+                } else {
+                    // 경로 없으면 직선 fallback
+                    result.append(from)
+                    result.append(to)
+                }
+            } catch {
+                // 실패 시 직선 fallback
+                result.append(from)
+                result.append(to)
+            }
+        }
+
+        routedCoordinates = result
+    }
+
     func shareRoute() {
         // TODO: 공유 기능 구현
     }
