@@ -265,10 +265,16 @@ class AnalysisViewModel: ObservableObject {
             // OCR 실행 (GPS 없는 경우에만)
             var roadName: String?
             var confidence: Float = 0
+            var rawOCRText: String?
+            var topOCRCandidates: [String] = []
             
             if metadata.coordinate == nil {
                 do {
                     let recognizedTexts = try await ocrService.recognizeText(in: photo.image)
+                    
+                    // AI 분석을 위한 원본 데이터 보관
+                    rawOCRText = recognizedTexts.map { $0.rawText }.joined(separator: "\n")
+                    topOCRCandidates = ocrService.topScoredCandidates(from: recognizedTexts, limit: 5).map { $0.candidate.text }
                     
                     // 가장 신뢰도 높은 도로명 선택
                     if let best = ocrService.bestRoadName(from: recognizedTexts) {
@@ -309,6 +315,8 @@ class AnalysisViewModel: ObservableObject {
             
             record.roadName = roadName
             record.ocrConfidence = confidence
+            record.rawOCRText = rawOCRText
+            record.topOCRCandidates = topOCRCandidates
             record.latitude = metadata.coordinate?.latitude
             record.longitude = metadata.coordinate?.longitude
             

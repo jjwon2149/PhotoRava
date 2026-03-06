@@ -13,6 +13,11 @@ struct RouteBottomSheet: View {
     @ObservedObject var viewModel: RouteMapViewModel
     @State private var isExporting = false
     
+    // AI 관련 상태
+    @State private var isGeneratingAI = false
+    @State private var aiCaption: String?
+    @State private var aiHighlights: [String] = []
+    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -28,9 +33,28 @@ struct RouteBottomSheet: View {
                 
                 // Title section
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("경로 결과")
-                        .font(.title2)
-                        .fontWeight(.bold)
+                    HStack {
+                        Text(viewModel.route.name.isEmpty ? "경로 결과" : viewModel.route.name)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        
+                        Spacer()
+                        
+                        if isGeneratingAI {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else if aiCaption == nil {
+                            Button {
+                                Task { await generateAISummary() }
+                            } label: {
+                                Label("AI 요약", systemImage: "sparkles")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.purple)
+                            .controlSize(.small)
+                        }
+                    }
                     
                     HStack(spacing: 4) {
                         Text(viewModel.route.date.formatted(date: .long, time: .omitted))
@@ -43,6 +67,38 @@ struct RouteBottomSheet: View {
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    
+                    // AI 요약 결과 표시
+                    if let caption = aiCaption {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(caption)
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                            
+                            if !aiHighlights.isEmpty {
+                                HStack(spacing: 6) {
+                                    ForEach(aiHighlights, id: \.self) { highlight in
+                                        Text(highlight)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.purple.opacity(0.1))
+                                            .foregroundStyle(.purple)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.03), radius: 4, x: 0, y: 2)
+                        )
+                        .padding(.top, 8)
+                    }
                 }
                 
                 // Statistics cards
@@ -216,6 +272,35 @@ struct RouteBottomSheet: View {
             top = presented
         }
         top.present(controller, animated: true)
+    }
+    
+    @MainActor
+    private func generateAISummary() async {
+        isGeneratingAI = true
+        defer { isGeneratingAI = false }
+        
+        let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: viewModel.route)
+        
+        do {
+            if #available(iOS 26.0, *) {
+                let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
+                withAnimation {
+                    viewModel.route.name = summary.title
+                    aiCaption = summary.caption
+                    aiHighlights = summary.highlights
+                }
+            } else {
+                // 하위 버전 테스트용 시뮬레이션
+                try await Task.sleep(nanoseconds: 800_000_000)
+                withAnimation {
+                    viewModel.route.name = "✨ [AI] \(snapshot.startName) 여정"
+                    aiCaption = "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록"
+                    aiHighlights = ["시뮬레이션 모드", "데이터 생성 완료"]
+                }
+            }
+        } catch {
+            print("AI Summary Generation Failed: \(error.localizedDescription)")
+        }
     }
 }
 

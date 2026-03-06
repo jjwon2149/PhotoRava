@@ -16,12 +16,103 @@ struct RouteEditView: View {
     @State private var showingDeleteAlert = false
     @State private var isRecalculating = false
     
+    // AI 관련 상태
+    @State private var isGeneratingAI = false
+    @State private var aiCaption: String?
+    @State private var aiDiary: String?
+    @State private var aiHighlights: [String] = []
+    
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    TextField("경로 이름", text: $route.name)
-                        .font(.headline)
+                    HStack {
+                        TextField("경로 이름", text: $route.name)
+                            .font(.headline)
+                        
+                        if isGeneratingAI {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button {
+                                Task { await generateAISummary() }
+                            } label: {
+                                Image(systemName: "sparkles")
+                                    .foregroundStyle(.purple)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    
+                    // AI 요약 결과 및 감성 일기 미리보기
+                    if let caption = aiCaption {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Label("AI의 여행 기록", systemImage: "sparkles")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.purple)
+                                Spacer()
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(caption)
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.primary)
+                                
+                                if let diary = aiDiary {
+                                    Text(diary)
+                                        .font(.system(size: 14, weight: .regular, design: .serif))
+                                        .lineSpacing(4)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.vertical, 4)
+                                }
+                                
+                                if !aiHighlights.isEmpty {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 6) {
+                                            ForEach(aiHighlights, id: \.self) { highlight in
+                                                Text(highlight)
+                                                    .font(.system(size: 10, weight: .medium))
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 4)
+                                                    .background(Color.purple.opacity(0.1))
+                                                    .foregroundStyle(.purple)
+                                                    .clipShape(Capsule())
+                                            }
+                                        }
+                                    }
+                                    .padding(.top, 4)
+                                }
+                            }
+                            .padding(16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+                            )
+                            
+                            HStack {
+                                Spacer()
+                                Button {
+                                    Task { await generateAISummary() }
+                                } label: {
+                                    Label("다시 만들기", systemImage: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.purple)
+                                .controlSize(.mini)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                } footer: {
+                    if aiCaption == nil {
+                        Text("✨ 마법봉을 눌러 AI가 제안하는 매력적인 제목과 일기를 만들어보세요.")
+                    }
                 }
                 
                 Section("사진 (\(route.photoRecords.count)개)") {
@@ -107,10 +198,43 @@ struct RouteEditView: View {
         route.photoRecords.move(fromOffsets: source, toOffset: destination)
     }
     
+    @MainActor
+    private func generateAISummary() async {
+        print("AI Debug: Button tapped! Running simulation mode...")
+        
+        isGeneratingAI = true
+        defer { isGeneratingAI = false }
+        
+        let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
+        
+        do {
+            if #available(iOS 26.0, *) {
+                let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
+                withAnimation {
+                    self.route.name = summary.title
+                    self.aiCaption = summary.caption
+                    self.aiDiary = summary.diaryEntry
+                    self.aiHighlights = summary.highlights
+                }
+            } else {
+                // 하위 버전 테스트용 Mock (4번 기능 포함)
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                withAnimation {
+                    self.route.name = "✨ [AI] \(snapshot.startName) 여정"
+                    self.aiCaption = "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록"
+                    self.aiDiary = "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다."
+                    self.aiHighlights = ["AI 시뮬레이션 동작 중", "감성 일기 생성 완료", "이상치 제거 적용됨"]
+                }
+            }
+        } catch {
+            print("AI Debug Error: \(error.localizedDescription)")
+        }
+    }
+    
     private func saveChanges() async {
         isRecalculating = true
         
-        // 파생 데이터 재계산 (좌표, 거리, 시간, 도로명 목록)
+        // 파생 데이터 재계산 (Feature 3: 최적화 로직 포함됨)
         await RouteReconstructionService.shared.recalculateRouteData(for: route)
         
         // SwiftData에 저장
@@ -126,5 +250,3 @@ struct RouteEditView: View {
         dismiss()
     }
 }
-
-

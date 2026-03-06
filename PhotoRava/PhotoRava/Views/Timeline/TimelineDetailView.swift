@@ -7,12 +7,15 @@
 
 import SwiftUI
 import MapKit
+import CoreLocation
 
 struct TimelineDetailView: View {
     let route: Route
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditSheet = false
     @State private var showingMapView = false
+    @State private var selectedPhotoForReview: PhotoRecord?
+    @State private var showingRecommendationSheet = false
     @StateObject private var locationResolver = TimelineLocationResolver()
     
     var body: some View {
@@ -58,6 +61,12 @@ struct TimelineDetailView: View {
         .sheet(isPresented: $showingEditSheet) {
             RouteEditView(route: route)
         }
+        .sheet(isPresented: $showingRecommendationSheet) {
+            if let photo = selectedPhotoForReview {
+                GeocodeRecommendationSheet(photo: photo, route: route)
+                    .presentationDetents([PresentationDetent.medium])
+            }
+        }
         .fullScreenCover(isPresented: $showingMapView) {
             NavigationStack {
                 RouteMapView(route: route)
@@ -100,30 +109,48 @@ struct TimelineDetailView: View {
             }
             
             // Stats overlay
-            HStack(spacing: 16) {
-                StatOverlay(
-                    title: "TOTAL DISTANCE",
-                    value: String(format: "%.1f km", route.totalDistance)
-                )
+            VStack(alignment: .leading, spacing: 4) {
+                Text(route.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 
-                StatOverlay(
-                    title: "DURATION",
-                    value: formatDuration(route.duration)
-                )
+                Text("\(String(format: "%.1f", route.totalDistance)) km · \(Int(route.duration / 60)) min")
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .padding()
+            .padding(.bottom, 20)
         }
     }
     
     private var timelineList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(route.photoRecords.enumerated()), id: \.element.id) { index, record in
+        let sortedRecords = route.photoRecords.sorted { $0.capturedAt < $1.capturedAt }
+        
+        return VStack(spacing: 0) {
+            ForEach(Array(sortedRecords.enumerated()), id: \.offset) { index, record in
                 TimelineItemView(
                     record: record,
                     locationResolver: locationResolver,
                     isFirst: index == 0,
-                    isLast: index == route.photoRecords.count - 1
-                )
+                    isLast: index == sortedRecords.count - 1
+                ) {
+                    // 신뢰도가 낮거나 좌표가 없는 경우 시트 오픈
+                    if let conf = record.aiConfidence, conf < 0.75 {
+                        selectedPhotoForReview = record
+                        showingRecommendationSheet = true
+                    } else if record.latitude == nil && record.aiQuery != nil {
+                        selectedPhotoForReview = record
+                        showingRecommendationSheet = true
+                    }
+                }
             }
         }
     }
@@ -139,50 +166,22 @@ struct TimelineDetailView: View {
         let latitudes = coordinates.map { $0.latitude }
         let longitudes = coordinates.map { $0.longitude }
         
-        let minLat = latitudes.min() ?? 0
-        let maxLat = latitudes.max() ?? 0
-        let minLon = longitudes.min() ?? 0
-        let maxLon = longitudes.max() ?? 0
+        let minLat = latitudes.min()!
+        let maxLat = latitudes.max()!
+        let minLon = longitudes.min()!
+        let maxLon = longitudes.max()!
         
-        return MKCoordinateRegion(
-            center: CLLocationCoordinate2D(
-                latitude: (minLat + maxLat) / 2,
-                longitude: (minLon + maxLon) / 2
-            ),
-            span: MKCoordinateSpan(
-                latitudeDelta: max((maxLat - minLat) * 1.5, 0.01),
-                longitudeDelta: max((maxLon - minLon) * 1.5, 0.01)
-            )
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
         )
-    }
-    
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let hours = Int(duration) / 3600
-        let minutes = (Int(duration) % 3600) / 60
-        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes) min"
-    }
-}
-
-struct StatOverlay: View {
-    let title: String
-    let value: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption2)
-                .fontWeight(.bold)
-                .foregroundStyle(.secondary)
-                .tracking(0.5)
-            
-            Text(value)
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundStyle(.primary)
-        }
-        .padding(12)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        
+        let span = MKCoordinateSpan(
+            latitudeDelta: (maxLat - minLat) * 1.5,
+            longitudeDelta: (maxLon - minLon) * 1.5
+        )
+        
+        return MKCoordinateRegion(center: center, span: span)
     }
 }
 
@@ -191,10 +190,11 @@ struct TimelineItemView: View {
     @ObservedObject var locationResolver: TimelineLocationResolver
     let isFirst: Bool
     let isLast: Bool
+    var onReviewTap: (() -> Void)? = nil
     
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            // Timeline indicator
+        HStack(alignment: .top, spacing: 0) {
+            // Line and dot column
             VStack(spacing: 0) {
                 // Top line
                 if !isFirst {
@@ -228,60 +228,106 @@ struct TimelineItemView: View {
                         .frame(minHeight: 60)
                 }
             }
+            .frame(width: 44)
             
             // Content card
-            HStack(spacing: 12) {
-                // Photo thumbnail
-                if let imageData = record.imageData,
-                   let uiImage = UIImage(data: imageData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                        .frame(width: 56, height: 56)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .foregroundStyle(.secondary)
-                        )
-                }
-                
-                // Info
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(addressTitle)
-                        .font(.body)
-                        .fontWeight(.semibold)
-                        .lineLimit(2)
-                    
-                    Text(subtitleText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    
-                    // Confidence indicator
-                    if record.ocrConfidence > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: record.ocrConfidence > 0.8 ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                .font(.caption2)
-                            Text(String(format: "%.0f%% 일치", record.ocrConfidence * 100))
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(record.ocrConfidence > 0.8 ? .green : .orange)
+            Button {
+                onReviewTap?()
+            } label: {
+                HStack(spacing: 12) {
+                    // Photo thumbnail
+                    if let imageData = record.imageData,
+                       let uiImage = UIImage(data: imageData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.systemGray5))
+                            .frame(width: 56, height: 56)
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .foregroundStyle(.secondary)
+                            )
                     }
+                    
+                    // Info
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(addressTitle)
+                            .font(.body)
+                            .fontWeight(.semibold)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        
+                        Text(subtitleText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        
+                        // AI/OCR Status indicators
+                        HStack(spacing: 8) {
+                            // AI Confidence Indicator (Capsule Badge)
+                            if let aiConf = record.aiConfidence {
+                                HStack(spacing: 4) {
+                                    Image(systemName: aiConf >= 0.75 ? "sparkles" : "exclamationmark.triangle.fill")
+                                        .font(.system(size: 8, weight: .bold))
+                                    Text(String(format: aiConf >= 0.75 ? "AI %.0f%%" : "확인 필요 %.0f%%", aiConf * 100))
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    Capsule()
+                                        .fill(aiConf >= 0.75 ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1))
+                                )
+                                .foregroundStyle(aiConf >= 0.75 ? .blue : .orange)
+                            } else if record.latitude == nil && record.longitude == nil {
+                                // Still analyzing or pending
+                                HStack(spacing: 4) {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .scaleEffect(0.7)
+                                    Text("AI 분석 중")
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color(.systemGray6)))
+                                .foregroundStyle(.secondary)
+                            }
+                            
+                            // Legacy OCR Confidence
+                            if record.ocrConfidence > 0 && record.aiConfidence == nil {
+                                HStack(spacing: 4) {
+                                    Image(systemName: record.ocrConfidence > 0.8 ? "checkmark" : "exclamationmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                    Text(String(format: "OCR %.0f%%", record.ocrConfidence * 100))
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    Capsule()
+                                        .fill(record.ocrConfidence > 0.8 ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
+                                )
+                                .foregroundStyle(record.ocrConfidence > 0.8 ? .green : .orange)
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                    
+                    Spacer()
                 }
-                
-                Spacer()
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .padding(12)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(.plain)
         }
         .padding(.horizontal)
         .padding(.vertical, 4)
         .task {
-            // 좌표가 있다면 주소(동/구/시) 변환을 항상 시도합니다.
             if let lat = record.latitude, let lon = record.longitude {
                 await locationResolver.resolveIfNeeded(latitude: lat, longitude: lon)
             }
@@ -289,15 +335,15 @@ struct TimelineItemView: View {
     }
     
     private var addressTitle: String {
-        // 1순위: GPS 기반 행정 주소
         if let lat = record.latitude, let lon = record.longitude {
             if let cached = locationResolver.cachedName(latitude: lat, longitude: lon) {
                 return cached
             }
-            // 아직 변환 전이라면 좌표를 보여줍니다.
             return locationResolver.fallbackCoordinateText(latitude: lat, longitude: lon)
         }
-        // 2순위: GPS가 없고 도로명만 있는 경우 (OCR 결과물)
+        if let aiQuery = record.aiQuery, !aiQuery.isEmpty {
+            return aiQuery
+        }
         if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines), !roadName.isEmpty {
             return roadName
         }
@@ -306,24 +352,142 @@ struct TimelineItemView: View {
 
     private var subtitleText: String {
         let time = record.capturedAt.formatted(date: .omitted, time: .shortened)
-        
-        // 인식된 도로명이 있고, 그것이 제목과 중복되지 않을 때만 부제목에 추가
         if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines), 
            !roadName.isEmpty, 
            roadName != addressTitle {
             return "\(time) · \(roadName)"
         }
-        
         return time
     }
     
     private var dotColor: Color {
-        if isFirst {
-            return .primaryBlue
-        } else if isLast {
+        if isFirst || isLast {
             return .primaryBlue
         } else {
             return Color(.systemGray)
+        }
+    }
+}
+
+// MARK: - GeocodeRecommendationSheet (Merged to ensure visibility)
+
+struct GeocodeRecommendationSheet: View {
+    let photo: PhotoRecord
+    let route: Route
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @State private var isProcessing = false
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let imageData = photo.imageData, let uiImage = UIImage(data: imageData) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 150)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        
+                        Text("AI가 분석한 위치 정보가 불분명합니다.")
+                            .font(.headline)
+                        
+                        if let reason = photo.aiReason {
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                Section("추천 주소 선택") {
+                    if let query = photo.aiQuery, !query.isEmpty {
+                        suggestionRow(query, confidence: photo.aiConfidence ?? 0, isTop: true)
+                    }
+                    
+                    ForEach(photo.aiAlternatives, id: \.self) { alt in
+                        suggestionRow(alt, confidence: (photo.aiConfidence ?? 0) * 0.8, isTop: false)
+                    }
+                }
+                
+                Section {
+                    Button(role: .cancel) {
+                        dismiss()
+                    } label: {
+                        Text("나중에 결정하기")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .navigationTitle("위치 확인")
+            .navigationBarTitleDisplayMode(.inline)
+            .disabled(isProcessing)
+            .overlay {
+                if isProcessing {
+                    ProgressView("위치 업데이트 중...")
+                        .padding()
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+    
+    private func suggestionRow(_ query: String, confidence: Double, isTop: Bool) -> some View {
+        Button {
+            Task { await selectQuery(query) }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(query)
+                        .font(.body)
+                        .fontWeight(isTop ? .bold : .regular)
+                        .foregroundStyle(.primary)
+                    
+                    Text(String(format: "신뢰도 %.0f%%", confidence * 100))
+                        .font(.caption2)
+                        .foregroundStyle(confidence >= 0.7 ? .blue : .secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+    
+    @MainActor
+    private func selectQuery(_ query: String) async {
+        isProcessing = true
+        defer { isProcessing = false }
+        
+        let geocoder = CLGeocoder()
+        let searchString = query.contains("서울") ? query : "\(query), 대한민국"
+        
+        do {
+            let placemarks = try await geocoder.geocodeAddressString(searchString)
+            if let location = placemarks.first?.location {
+                // 좌표 업데이트
+                photo.latitude = location.coordinate.latitude
+                photo.longitude = location.coordinate.longitude
+                photo.aiQuery = query
+                photo.aiConfidence = 1.0 // 사용자 확정
+                
+                // Route 통계 재계산
+                await RouteReconstructionService.shared.recalculateRouteData(for: route)
+                
+                // 저장
+                try? modelContext.save()
+                
+                dismiss()
+            }
+        } catch {
+            print("Geocoding failed for selected query: \(error)")
         }
     }
 }

@@ -22,61 +22,141 @@ class RouteReconstructionService {
         route.photoRecords.removeAll()
         route.photoRecords.append(contentsOf: sortedRecords)
         
-        // 좌표 수집
-        var coordinates: [StoredCoordinate] = []
-        var geocodingFailures: [String] = []
-        
-        for record in sortedRecords {
-            // GPS 좌표가 있으면 사용
-            if let lat = record.latitude, let lon = record.longitude {
-                let coord = StoredCoordinate(latitude: lat, longitude: lon)
-                coordinates.append(coord)
-            }
-            // GPS가 없으면 도로명으로 지오코딩 시도
-            else if let roadName = record.roadName, !roadName.isEmpty {
-                do {
-                    if let geocoded = try await geocodeUsingAppleMaps(roadName: roadName) {
-                        coordinates.append(geocoded)
-                        
-                        // 역지오코딩한 좌표를 레코드에 저장
-                        record.latitude = geocoded.latitude
-                        record.longitude = geocoded.longitude
-                    } else {
-                        geocodingFailures.append(roadName)
+        for (index, record) in sortedRecords.enumerated() {
+            // GPS가 없고 OCR 결과(또는 후보 도로명)가 있는 경우 AI 분석 시도
+            if record.latitude == nil || record.longitude == nil {
+                // AI 분석을 백그라운드 Task로 실행 (개별 레코드별 점진적 업데이트)
+                if #available(iOS 26.0, *) {
+                    Task {
+                        await processAIAnalysis(for: record, index: index, in: sortedRecords, updateRoute: route)
                     }
-                } catch {
-                    geocodingFailures.append(roadName)
-                    print("Geocoding failed for \(roadName): \(error.localizedDescription)")
                 }
             }
         }
         
-        // 지오코딩 실패한 도로명이 있으면 로그 출력 (크래시 방지)
-        if !geocodingFailures.isEmpty {
-            print("Warning: Failed to geocode \(geocodingFailures.count) road names: \(geocodingFailures.joined(separator: ", "))")
-        }
+        // 초기 좌표 수집 (이미 있는 GPS 기반으로 먼저 경로 그리기)
+        updateRouteStatistics(route, sortedRecords: sortedRecords)
+    }
+
+    @available(iOS 26.0, *)
+    private func processAIAnalysis(for record: PhotoRecord, index: Int, in records: [PhotoRecord], updateRoute: Route?) async {
+        let aiService = LocalAIService.shared
         
-        // 좌표 데이터 저장
+        // 1. 컨텍스트 구성
+        let neighbors = extractNeighborHints(for: index, in: records)
+        let input = OCRContextInput(
+            rawText: record.rawOCRText ?? "",
+            topCandidates: record.topOCRCandidates,
+            localeHint: nil,
+            neighborPhotoHints: neighbors
+        )
+        
         do {
-            if let coordinatesData = try? JSONEncoder().encode(coordinates) {
-                route.coordinatesData = coordinatesData
+            // 2. AI 쿼리 계획 생성
+            let plan = try await aiService.routeGeocodePlanner(input: input)
+            
+            // 3. PhotoRecord 업데이트 (UI 반영용)
+            record.aiQuery = plan.query
+            record.aiConfidence = plan.confidence
+            record.aiReason = plan.reason
+            record.aiAlternatives = plan.alternatives
+            
+            // 4. 지오코딩 시도 (AI Query 우선 - 신뢰도 0.75 이상 시 자동 확정)
+            if plan.confidence >= 0.75 {
+                if let geocoded = try await geocodeWithAIPlan(plan) {
+                    record.latitude = geocoded.latitude
+                    record.longitude = geocoded.longitude
+                    
+                    // 5. Route 통계 재계산 트리거 (UI 알림용)
+                    if let route = updateRoute {
+                        await MainActor.run {
+                            updateRouteStatistics(route, sortedRecords: records)
+                        }
+                    }
+                }
             }
         } catch {
-            print("Error encoding coordinates: \(error.localizedDescription)")
-            // 좌표 인코딩 실패해도 계속 진행
+            print("AI Analysis failed for record \(record.id): \(error.localizedDescription)")
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func geocodeWithAIPlan(_ plan: GeocodeQueryPlan) async throws -> StoredCoordinate? {
+        // 1순위: AI 정규화 쿼리
+        if let result = try await geocodeUsingAppleMaps(roadName: plan.query) {
+            return result
         }
         
-        // 통계 계산
-        route.totalDistance = calculateDistance(coordinates)
-        route.duration = calculateDuration(from: sortedRecords)
+        // 2순위: 대안 쿼리들
+        for alt in plan.alternatives {
+            if let result = try await geocodeUsingAppleMaps(roadName: alt) {
+                return result
+            }
+        }
         
-        // 중복 제거한 도로명 리스트 (좌표 유무와 무관하게 저장)
-        route.roadNames = Array(
-            Set(sortedRecords.compactMap { record in
-                guard let name = record.roadName, !name.isEmpty else { return nil }
-                return name
-            })
-        ).sorted()
+        return nil
+    }
+
+    private func updateRouteStatistics(_ route: Route, sortedRecords: [PhotoRecord]) {
+        var coordinates: [StoredCoordinate] = []
+        for record in sortedRecords {
+            if let lat = record.latitude, let lon = record.longitude {
+                coordinates.append(StoredCoordinate(latitude: lat, longitude: lon))
+            }
+        }
+        
+        // --- Feature 3: Path Optimization (Anomaly Detection) ---
+        let optimizedCoordinates = optimizePath(coordinates)
+        
+        // 좌표 데이터 저장 (최적화된 좌표 사용)
+        if let coordinatesData = try? JSONEncoder().encode(optimizedCoordinates) {
+            route.coordinatesData = coordinatesData
+        }
+        
+        route.totalDistance = calculateDistance(optimizedCoordinates)
+        route.duration = calculateDuration(from: sortedRecords)
+        route.roadNames = Array(Set(sortedRecords.compactMap { $0.roadName ?? $0.aiQuery })).sorted()
+    }
+
+    /// GPS 튐 현상이나 잘못된 OCR 좌표를 감지하여 경로를 매끄럽게 보정
+    private func optimizePath(_ coordinates: [StoredCoordinate]) -> [StoredCoordinate] {
+        guard coordinates.count > 2 else { return coordinates }
+        
+        var results = coordinates
+        let maxSpeedKmH: Double = 150.0 // 시속 150km 이상은 일단 의심 (도심/일반도로 기준)
+        
+        for i in 1..<(results.count - 1) {
+            let prev = results[i-1]
+            let current = results[i]
+            let next = results[i+1]
+            
+            let distPrev = calculateDistanceBetween(prev, current) // km
+            // 시간 데이터가 있다면 더 정확하겠지만, 여기서는 거리 기반 급격한 꺾임 감지 (Heuristic)
+            
+            // 단순 알고리즘: 이전/이후 지점과의 거리가 급격히 멀고, 
+            // 이전-이후 지점은 가까운 경우 (V자 튐 현상)
+            let distNext = calculateDistanceBetween(current, next)
+            let distDirect = calculateDistanceBetween(prev, next)
+            
+            if distPrev + distNext > distDirect * 2.5 && distDirect < 5.0 {
+                // 이상치 감지! (V자형 튐)
+                results[i].isAnomaly = true
+                results[i].isOptimized = true
+                
+                // 보정: 이전과 이후의 중간지점으로 이동
+                results[i].latitude = (prev.latitude + next.latitude) / 2
+                results[i].longitude = (prev.longitude + next.longitude) / 2
+                print("AI Optimization: Corrected anomaly at index \(i)")
+            }
+        }
+        
+        return results
+    }
+
+    private func calculateDistanceBetween(_ p1: StoredCoordinate, _ p2: StoredCoordinate) -> Double {
+        let loc1 = CLLocation(latitude: p1.latitude, longitude: p1.longitude)
+        let loc2 = CLLocation(latitude: p2.latitude, longitude: p2.longitude)
+        return loc1.distance(from: loc2) / 1000.0 // km
     }
     
     func reconstructRoute(from photoRecords: [PhotoRecord]) async throws -> Route {
@@ -135,26 +215,19 @@ class RouteReconstructionService {
         // 모든 PhotoRecord 추가 (도로명 없는 것도 포함)
         route.photoRecords = sortedRecords
         
-        // 좌표 데이터 저장
-        if let coordinatesData = try? JSONEncoder().encode(coordinates) {
-            route.coordinatesData = coordinatesData
+        // AI 분석 비동기 시작 (기존 GPS 위주로 먼저 생성 후 보완)
+        for (index, record) in sortedRecords.enumerated() {
+            if record.latitude == nil || record.longitude == nil {
+                if #available(iOS 26.0, *) {
+                    Task {
+                        await processAIAnalysis(for: record, index: index, in: sortedRecords, updateRoute: route)
+                    }
+                }
+            }
         }
-        
-        // 통계 계산
-        route.totalDistance = calculateDistance(coordinates)
-        route.duration = calculateDuration(from: sortedRecords)
-        
-        // 중복 제거한 도로명 리스트 (좌표 유무와 무관하게 저장)
-        route.roadNames = Array(
-            Set(sortedRecords.compactMap { record in
-                guard let name = record.roadName, !name.isEmpty else { return nil }
-                return name
-            })
-        ).sorted()
-        
-        if !geocodingFailures.isEmpty {
-            print("Warning: Failed to geocode \(geocodingFailures.count) road names: \(geocodingFailures.joined(separator: ", "))")
-        }
+
+        // 초기 좌표 수집 및 통계 계산
+        updateRouteStatistics(route, sortedRecords: sortedRecords)
         
         return route
     }
@@ -180,6 +253,33 @@ class RouteReconstructionService {
         }
         
         return nil
+    }
+
+    /// 인근 사진들의 정보를 기반으로 AI 지오코딩을 위한 힌트들을 추출
+    private func extractNeighborHints(for index: Int, in records: [PhotoRecord]) -> [NeighborHint] {
+        var hints: [NeighborHint] = []
+        
+        // 이전 사진 힌트
+        if index > 0 {
+            let prev = records[index - 1]
+            var coord: CLLocationCoordinate2D?
+            if let lat = prev.latitude, let lon = prev.longitude {
+                coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            }
+            hints.append(NeighborHint(direction: .previous, roadName: prev.roadName, coordinate: coord))
+        }
+        
+        // 다음 사진 힌트
+        if index < records.count - 1 {
+            let next = records[index + 1]
+            var coord: CLLocationCoordinate2D?
+            if let lat = next.latitude, let lon = next.longitude {
+                coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            }
+            hints.append(NeighborHint(direction: .next, roadName: next.roadName, coordinate: coord))
+        }
+        
+        return hints
     }
     
     private func calculateDistance(_ coordinates: [StoredCoordinate]) -> Double {
@@ -224,6 +324,49 @@ class RouteReconstructionService {
         }
         
         return "\(dateString) 경로"
+    }
+
+    /// AI 요약/제목 생성을 위한 경로 통계 스냅샷 빌드
+    func buildStatsSnapshot(for route: Route) -> RouteStatsSnapshot {
+        let sortedRecords = route.photoRecords.sorted { $0.capturedAt < $1.capturedAt }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        
+        var dateRange = ""
+        if let firstDate = sortedRecords.first?.capturedAt, let lastDate = sortedRecords.last?.capturedAt {
+            let firstStr = formatter.string(from: firstDate)
+            let lastStr = formatter.string(from: lastDate)
+            dateRange = firstStr == lastStr ? firstStr : "\(firstStr) ~ \(lastStr)"
+        }
+        
+        let startName = sortedRecords.first?.roadName ?? sortedRecords.first?.aiQuery ?? "알 수 없는 출발지"
+        let endName = sortedRecords.last?.roadName ?? sortedRecords.last?.aiQuery ?? "알 수 없는 도착지"
+        
+        // 시간대 판별 (첫 사진 기준)
+        var timeOfDay = "주간"
+        if let firstTime = sortedRecords.first?.capturedAt {
+            let hour = Calendar.current.component(.hour, from: firstTime)
+            switch hour {
+            case 6..<12: timeOfDay = "오전"
+            case 12..<18: timeOfDay = "오후"
+            case 18..<22: timeOfDay = "저녁"
+            default: timeOfDay = "야간"
+            }
+        }
+        
+        return RouteStatsSnapshot(
+            distanceKm: route.totalDistance,
+            durationMin: Int(route.duration / 60),
+            startName: startName,
+            endName: endName,
+            photoCount: route.photoCount,
+            dateRange: dateRange,
+            visitedRoadsTopN: Array(route.roadNames.prefix(5)),
+            timeOfDay: timeOfDay,
+            areaKeywords: route.roadNames,
+            userEditedTitle: route.name
+        )
     }
 }
 
