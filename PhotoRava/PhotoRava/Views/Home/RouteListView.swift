@@ -26,6 +26,10 @@ struct RouteListView: View {
         return routes.filter { route in
             // 경로 이름 검색
             route.name.lowercased().contains(searchLower) ||
+            // AI 요약 검색
+            (route.aiSummaryCaption?.lowercased().contains(searchLower) ?? false) ||
+            (route.aiSummaryDiary?.lowercased().contains(searchLower) ?? false) ||
+            route.aiSummaryHighlights.contains { $0.lowercased().contains(searchLower) } ||
             // 방문 도로명 검색
             route.roadNames.contains { $0.lowercased().contains(searchLower) } ||
             // 날짜 검색 (여러 포맷 지원)
@@ -254,11 +258,35 @@ struct RouteCardView: View {
                     .font(.body)
                     .fontWeight(.bold)
                     .lineLimit(1)
+
+                if let caption = route.aiSummaryCaption,
+                   !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 
                 // Date
                 Text(route.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                if !route.aiSummaryHighlights.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(route.aiSummaryHighlights.prefix(2), id: \.self) { highlight in
+                                Text(highlight)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.primaryBlue.opacity(0.08))
+                                    .foregroundStyle(Color.primaryBlue)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
             }
         }
         .padding(12)

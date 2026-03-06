@@ -18,6 +18,12 @@ class Route {
     var totalDistance: Double // km
     var duration: TimeInterval // seconds
     var roadNames: [String]
+    var aiSummaryCaption: String?
+    var aiSummaryDiary: String?
+    var aiSummaryHighlights: [String] = []
+    var aiSummaryToneRawValue: String?
+    var aiSummaryConfidence: Double?
+    var aiSummaryGeneratedAt: Date?
     
     // 지도용 좌표들 (JSON으로 저장)
     var coordinatesData: Data?
@@ -34,6 +40,38 @@ class Route {
         self.totalDistance = 0
         self.duration = 0
         self.roadNames = []
+    }
+}
+
+extension Route {
+    @available(iOS 26.0, *)
+    func apply(summary: RouteSummary) {
+        name = summary.title
+        aiSummaryCaption = summary.caption
+        aiSummaryDiary = summary.diaryEntry
+        aiSummaryHighlights = summary.highlights
+        aiSummaryToneRawValue = summary.tone.rawValue
+        aiSummaryConfidence = summary.confidence
+        aiSummaryGeneratedAt = Date()
+    }
+
+    func applyStoredSummary(
+        title: String? = nil,
+        caption: String?,
+        diary: String?,
+        highlights: [String],
+        toneRawValue: String?,
+        confidence: Double?
+    ) {
+        if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            name = title
+        }
+        aiSummaryCaption = caption
+        aiSummaryDiary = diary
+        aiSummaryHighlights = highlights
+        aiSummaryToneRawValue = toneRawValue
+        aiSummaryConfidence = confidence
+        aiSummaryGeneratedAt = Date()
     }
 }
 

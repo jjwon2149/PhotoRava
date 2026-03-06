@@ -6,9 +6,10 @@
 //
 
 import Foundation
+import Combine
 
 /// AI 분석 품질 측정을 위한 로컬 로거
-class AILogger {
+final class AILogger: ObservableObject {
     static let shared = AILogger()
     private init() {}
     

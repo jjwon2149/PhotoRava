@@ -8,9 +8,11 @@
 import SwiftUI
 import Photos
 import UIKit
+import SwiftData
 
 struct RouteBottomSheet: View {
     @ObservedObject var viewModel: RouteMapViewModel
+    @Environment(\.modelContext) private var modelContext
     @State private var isExporting = false
     
     // AI 관련 상태
@@ -166,6 +168,9 @@ struct RouteBottomSheet: View {
             }
             .padding()
         }
+        .task(id: viewModel.route.id) {
+            syncStoredAISummary()
+        }
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
@@ -180,9 +185,10 @@ struct RouteBottomSheet: View {
     }
     
     private func shareRouteTextFallback() {
+        let summaryText = routeShareSummaryText()
         let text = """
         \(viewModel.route.name)
-        거리: \(String(format: "%.1f", viewModel.route.totalDistance))km
+        \(summaryText.isEmpty ? "" : "\(summaryText)\n")거리: \(String(format: "%.1f", viewModel.route.totalDistance))km
         소요 시간: \(formatDuration(viewModel.route.duration))
         """
 
@@ -285,22 +291,48 @@ struct RouteBottomSheet: View {
             if #available(iOS 26.0, *) {
                 let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
                 withAnimation {
-                    viewModel.route.name = summary.title
-                    aiCaption = summary.caption
-                    aiHighlights = summary.highlights
+                    viewModel.route.apply(summary: summary)
+                    syncStoredAISummary()
                 }
             } else {
-                // 하위 버전 테스트용 시뮬레이션
+                // 하위 버전 fallback
                 try await Task.sleep(nanoseconds: 800_000_000)
                 withAnimation {
-                    viewModel.route.name = "✨ [AI] \(snapshot.startName) 여정"
-                    aiCaption = "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록"
-                    aiHighlights = ["시뮬레이션 모드", "데이터 생성 완료"]
+                    viewModel.route.applyStoredSummary(
+                        title: "✨ [AI] \(snapshot.startName) 여정",
+                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
+                        diary: viewModel.route.aiSummaryDiary,
+                        highlights: ["경로 기록 보완", "요약 생성 완료"],
+                        toneRawValue: nil,
+                        confidence: nil
+                    )
+                    syncStoredAISummary()
                 }
             }
+            try? modelContext.save()
         } catch {
             print("AI Summary Generation Failed: \(error.localizedDescription)")
         }
+    }
+
+    private func syncStoredAISummary() {
+        aiCaption = viewModel.route.aiSummaryCaption
+        aiHighlights = viewModel.route.aiSummaryHighlights
+    }
+
+    private func routeShareSummaryText() -> String {
+        var parts: [String] = []
+
+        if let caption = viewModel.route.aiSummaryCaption,
+           !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(caption)
+        }
+
+        if !viewModel.route.aiSummaryHighlights.isEmpty {
+            parts.append(viewModel.route.aiSummaryHighlights.prefix(3).joined(separator: " · "))
+        }
+
+        return parts.joined(separator: "\n")
     }
 }
 

@@ -117,6 +117,18 @@ struct TimelineDetailView: View {
                     .padding(.vertical, 6)
                     .background(.black.opacity(0.6))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                if let caption = route.aiSummaryCaption,
+                   !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.4))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .lineLimit(2)
+                }
                 
                 Text("\(String(format: "%.1f", route.totalDistance)) km · \(Int(route.duration / 60)) min")
                     .font(.caption)
@@ -479,7 +491,7 @@ struct GeocodeRecommendationSheet: View {
                 photo.aiConfidence = 1.0 // 사용자 확정
                 
                 // Route 통계 재계산
-                await RouteReconstructionService.shared.recalculateRouteData(for: route)
+                await RouteReconstructionService.shared.recalculateRouteData(for: route, modelContext: modelContext)
                 
                 // 저장
                 try? modelContext.save()

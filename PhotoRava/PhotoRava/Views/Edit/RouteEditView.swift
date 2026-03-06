@@ -187,6 +187,9 @@ struct RouteEditView: View {
             } message: {
                 Text("이 경로를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
             }
+            .task(id: route.id) {
+                syncStoredAISummary()
+            }
         }
     }
     
@@ -200,8 +203,6 @@ struct RouteEditView: View {
     
     @MainActor
     private func generateAISummary() async {
-        print("AI Debug: Button tapped! Running simulation mode...")
-        
         isGeneratingAI = true
         defer { isGeneratingAI = false }
         
@@ -211,23 +212,27 @@ struct RouteEditView: View {
             if #available(iOS 26.0, *) {
                 let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
                 withAnimation {
-                    self.route.name = summary.title
-                    self.aiCaption = summary.caption
-                    self.aiDiary = summary.diaryEntry
-                    self.aiHighlights = summary.highlights
+                    self.route.apply(summary: summary)
+                    syncStoredAISummary()
                 }
             } else {
-                // 하위 버전 테스트용 Mock (4번 기능 포함)
+                // 하위 버전 fallback
                 try await Task.sleep(nanoseconds: 1_000_000_000)
                 withAnimation {
-                    self.route.name = "✨ [AI] \(snapshot.startName) 여정"
-                    self.aiCaption = "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록"
-                    self.aiDiary = "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다."
-                    self.aiHighlights = ["AI 시뮬레이션 동작 중", "감성 일기 생성 완료", "이상치 제거 적용됨"]
+                    self.route.applyStoredSummary(
+                        title: "✨ [AI] \(snapshot.startName) 여정",
+                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
+                        diary: "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다.",
+                        highlights: ["경로 기록 보완", "감성 요약 생성", "이동 흐름 정리"],
+                        toneRawValue: nil,
+                        confidence: nil
+                    )
+                    syncStoredAISummary()
                 }
             }
+            try? modelContext.save()
         } catch {
-            print("AI Debug Error: \(error.localizedDescription)")
+            print("AI summary generation failed: \(error.localizedDescription)")
         }
     }
     
@@ -235,7 +240,7 @@ struct RouteEditView: View {
         isRecalculating = true
         
         // 파생 데이터 재계산 (Feature 3: 최적화 로직 포함됨)
-        await RouteReconstructionService.shared.recalculateRouteData(for: route)
+        await RouteReconstructionService.shared.recalculateRouteData(for: route, modelContext: modelContext)
         
         // SwiftData에 저장
         try? modelContext.save()
@@ -248,5 +253,11 @@ struct RouteEditView: View {
         modelContext.delete(route)
         try? modelContext.save()
         dismiss()
+    }
+
+    private func syncStoredAISummary() {
+        aiCaption = route.aiSummaryCaption
+        aiDiary = route.aiSummaryDiary
+        aiHighlights = route.aiSummaryHighlights
     }
 }

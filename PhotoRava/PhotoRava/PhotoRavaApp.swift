@@ -13,6 +13,11 @@ struct PhotoRavaApp: App {
     var body: some Scene {
         WindowGroup {
             MainTabView()
+                .task {
+                    if #available(iOS 26.0, *) {
+                        LocalAIService.shared.prewarmIfNeeded()
+                    }
+                }
         }
         .modelContainer(for: [Route.self, PhotoRecord.self])
     }

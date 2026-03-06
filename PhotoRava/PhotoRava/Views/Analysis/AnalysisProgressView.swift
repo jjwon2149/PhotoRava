@@ -193,11 +193,12 @@ struct AnalysisProgressView: View {
                     value: viewModel.isPulsing
                 )
             
-            Text("SYNCING WITH CLOUD")
+            Text("ON-DEVICE ANALYSIS")
                 .font(.caption2)
                 .fontWeight(.bold)
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("온디바이스 분석 진행 중")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -338,7 +339,29 @@ class AnalysisViewModel: ObservableObject {
         progress = 0.95
         
         do {
-            let route = try await RouteReconstructionService.shared.reconstructRoute(from: photoRecords)
+            let route = try await RouteReconstructionService.shared.reconstructRoute(
+                from: photoRecords,
+                modelContext: modelContext
+            )
+
+            currentStep = "AI 요약 생성 중..."
+            progress = 0.98
+
+            let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
+            if #available(iOS 26.0, *) {
+                if let summary = try? await LocalAIService.shared.routeNarrator(snapshot: snapshot) {
+                    route.apply(summary: summary)
+                }
+            } else {
+                route.applyStoredSummary(
+                    title: nil,
+                    caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "주간")의 기록",
+                    diary: nil,
+                    highlights: [snapshot.timeOfDay ?? "주간", "\(snapshot.durationMin)분 기록"],
+                    toneRawValue: nil,
+                    confidence: nil
+                )
+            }
             
             // SwiftData에 저장
             if let context = modelContext {

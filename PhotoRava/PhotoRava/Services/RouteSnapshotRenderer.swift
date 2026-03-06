@@ -67,6 +67,7 @@ enum RouteSnapshotRenderer {
 
             drawMarker(at: points.first!, fill: .systemGreen, letter: "S")
             drawMarker(at: points.last!, fill: .systemRed, letter: "E")
+            drawSummaryPanel(in: ctx.cgContext, route: route, size: size)
 
             func drawMarker(at point: CGPoint, fill: UIColor, letter: String) {
                 let outer = CGRect(x: point.x - 14, y: point.y - 14, width: 28, height: 28)
@@ -94,6 +95,71 @@ enum RouteSnapshotRenderer {
                 text.draw(in: rect)
             }
         }
+    }
+
+    private static func drawSummaryPanel(in context: CGContext, route: Route, size: CGSize) {
+        let title = route.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caption = route.aiSummaryCaption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stats = "\(String(format: "%.1f", route.totalDistance)) km · \(Int(route.duration / 60)) min"
+
+        guard !title.isEmpty || !caption.isEmpty else { return }
+
+        let horizontalPadding = size.width * 0.06
+        let bottomPadding = size.height * 0.06
+        let panelWidth = size.width - (horizontalPadding * 2)
+        let panelHeight = caption.isEmpty ? size.height * 0.12 : size.height * 0.19
+        let panelRect = CGRect(
+            x: horizontalPadding,
+            y: size.height - panelHeight - bottomPadding,
+            width: panelWidth,
+            height: panelHeight
+        )
+
+        context.saveGState()
+        let panelPath = UIBezierPath(roundedRect: panelRect, cornerRadius: 36)
+        context.setFillColor(UIColor.black.withAlphaComponent(0.58).cgColor)
+        context.addPath(panelPath.cgPath)
+        context.fillPath()
+        context.restoreGState()
+
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: size.width * 0.04, weight: .bold),
+            .foregroundColor: UIColor.white
+        ]
+
+        let captionParagraph = NSMutableParagraphStyle()
+        captionParagraph.lineBreakMode = .byWordWrapping
+        captionParagraph.lineSpacing = 6
+        let captionAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: size.width * 0.023, weight: .medium),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.92),
+            .paragraphStyle: captionParagraph
+        ]
+
+        let statsAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: size.width * 0.022, weight: .semibold),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.84)
+        ]
+
+        let contentX = panelRect.minX + 44
+        var currentY = panelRect.minY + 32
+
+        NSString(string: title).draw(
+            in: CGRect(x: contentX, y: currentY, width: panelRect.width - 88, height: 54),
+            withAttributes: titleAttributes
+        )
+        currentY += 58
+
+        if !caption.isEmpty {
+            let captionRect = CGRect(x: contentX, y: currentY, width: panelRect.width - 88, height: panelRect.height * 0.42)
+            NSString(string: caption).draw(with: captionRect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: captionAttributes, context: nil)
+            currentY = captionRect.maxY + 8
+        }
+
+        NSString(string: stats).draw(
+            in: CGRect(x: contentX, y: panelRect.maxY - 46, width: panelRect.width - 88, height: 32),
+            withAttributes: statsAttributes
+        )
     }
 
     private static func calculateRegion(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {

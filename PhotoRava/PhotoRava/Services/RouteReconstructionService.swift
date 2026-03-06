@@ -8,13 +8,14 @@
 import Foundation
 import CoreLocation
 import MapKit
+import SwiftData
 
 class RouteReconstructionService {
     static let shared = RouteReconstructionService()
     private init() {}
     
     /// 기존 Route의 파생 데이터를 재계산하여 업데이트
-    func recalculateRouteData(for route: Route) async {
+    func recalculateRouteData(for route: Route, modelContext: ModelContext? = nil) async {
         // 시간순 정렬 (SwiftData @Relationship 배열은 직접 수정)
         let sortedRecords = route.photoRecords.sorted { $0.capturedAt < $1.capturedAt }
         
@@ -23,12 +24,16 @@ class RouteReconstructionService {
         route.photoRecords.append(contentsOf: sortedRecords)
         
         for (index, record) in sortedRecords.enumerated() {
-            // GPS가 없고 OCR 결과(또는 후보 도로명)가 있는 경우 AI 분석 시도
-            if record.latitude == nil || record.longitude == nil {
-                // AI 분석을 백그라운드 Task로 실행 (개별 레코드별 점진적 업데이트)
+            if shouldAttemptAIAnalysis(for: record) {
                 if #available(iOS 26.0, *) {
                     Task {
-                        await processAIAnalysis(for: record, index: index, in: sortedRecords, updateRoute: route)
+                        await processAIAnalysis(
+                            for: record,
+                            index: index,
+                            in: sortedRecords,
+                            updateRoute: route,
+                            modelContext: modelContext
+                        )
                     }
                 }
             }
@@ -36,20 +41,21 @@ class RouteReconstructionService {
         
         // 초기 좌표 수집 (이미 있는 GPS 기반으로 먼저 경로 그리기)
         updateRouteStatistics(route, sortedRecords: sortedRecords)
+        await persistChanges(in: modelContext)
     }
 
     @available(iOS 26.0, *)
-    private func processAIAnalysis(for record: PhotoRecord, index: Int, in records: [PhotoRecord], updateRoute: Route?) async {
+    private func processAIAnalysis(
+        for record: PhotoRecord,
+        index: Int,
+        in records: [PhotoRecord],
+        updateRoute: Route?,
+        modelContext: ModelContext?
+    ) async {
         let aiService = LocalAIService.shared
         
         // 1. 컨텍스트 구성
-        let neighbors = extractNeighborHints(for: index, in: records)
-        let input = OCRContextInput(
-            rawText: record.rawOCRText ?? "",
-            topCandidates: record.topOCRCandidates,
-            localeHint: nil,
-            neighborPhotoHints: neighbors
-        )
+        let input = buildAIContextInput(for: record, index: index, in: records)
         
         do {
             // 2. AI 쿼리 계획 생성
@@ -75,6 +81,7 @@ class RouteReconstructionService {
                     }
                 }
             }
+            await persistChanges(in: modelContext)
         } catch {
             print("AI Analysis failed for record \(record.id): \(error.localizedDescription)")
         }
@@ -115,7 +122,7 @@ class RouteReconstructionService {
         
         route.totalDistance = calculateDistance(optimizedCoordinates)
         route.duration = calculateDuration(from: sortedRecords)
-        route.roadNames = Array(Set(sortedRecords.compactMap { $0.roadName ?? $0.aiQuery })).sorted()
+        route.roadNames = deduplicatedRoadNames(from: sortedRecords)
     }
 
     /// GPS 튐 현상이나 잘못된 OCR 좌표를 감지하여 경로를 매끄럽게 보정
@@ -123,7 +130,6 @@ class RouteReconstructionService {
         guard coordinates.count > 2 else { return coordinates }
         
         var results = coordinates
-        let maxSpeedKmH: Double = 150.0 // 시속 150km 이상은 일단 의심 (도심/일반도로 기준)
         
         for i in 1..<(results.count - 1) {
             let prev = results[i-1]
@@ -159,7 +165,7 @@ class RouteReconstructionService {
         return loc1.distance(from: loc2) / 1000.0 // km
     }
     
-    func reconstructRoute(from photoRecords: [PhotoRecord]) async throws -> Route {
+    func reconstructRoute(from photoRecords: [PhotoRecord], modelContext: ModelContext? = nil) async throws -> Route {
         guard !photoRecords.isEmpty else {
             throw RouteError.noPhotos
         }
@@ -169,7 +175,6 @@ class RouteReconstructionService {
         
         // 2. 좌표 수집 (GPS-first, 필요 시 roadName 지오코딩 보완)
         var coordinates: [StoredCoordinate] = []
-        var geocodingFailures: [String] = []
         
         for record in sortedRecords {
             // GPS 좌표가 있으면 사용
@@ -186,11 +191,8 @@ class RouteReconstructionService {
                         // 지오코딩한 좌표를 레코드에 저장
                         record.latitude = geocoded.latitude
                         record.longitude = geocoded.longitude
-                    } else {
-                        geocodingFailures.append(roadName)
                     }
                 } catch {
-                    geocodingFailures.append(roadName)
                     print("Geocoding failed for \(roadName): \(error.localizedDescription)")
                 }
             }
@@ -217,10 +219,16 @@ class RouteReconstructionService {
         
         // AI 분석 비동기 시작 (기존 GPS 위주로 먼저 생성 후 보완)
         for (index, record) in sortedRecords.enumerated() {
-            if record.latitude == nil || record.longitude == nil {
+            if shouldAttemptAIAnalysis(for: record) {
                 if #available(iOS 26.0, *) {
                     Task {
-                        await processAIAnalysis(for: record, index: index, in: sortedRecords, updateRoute: route)
+                        await processAIAnalysis(
+                            for: record,
+                            index: index,
+                            in: sortedRecords,
+                            updateRoute: route,
+                            modelContext: modelContext
+                        )
                     }
                 }
             }
@@ -228,8 +236,35 @@ class RouteReconstructionService {
 
         // 초기 좌표 수집 및 통계 계산
         updateRouteStatistics(route, sortedRecords: sortedRecords)
+        await persistChanges(in: modelContext)
         
         return route
+    }
+
+    private func shouldAttemptAIAnalysis(for record: PhotoRecord) -> Bool {
+        guard record.latitude == nil || record.longitude == nil else { return false }
+
+        if let roadName = normalized(record.roadName), !roadName.isEmpty {
+            return true
+        }
+        if let rawOCRText = normalized(record.rawOCRText), !rawOCRText.isEmpty {
+            return true
+        }
+        return !record.topOCRCandidates.isEmpty
+    }
+
+    private func buildAIContextInput(for record: PhotoRecord, index: Int, in records: [PhotoRecord]) -> OCRContextInput {
+        let neighbors = extractNeighborHints(for: index, in: records)
+        let baseCandidates = [record.roadName].compactMap { normalized($0) } + record.topOCRCandidates
+        let normalizedCandidates = deduplicatedCandidates(from: baseCandidates)
+        let rawText = normalized(record.rawOCRText) ?? normalized(record.roadName) ?? ""
+
+        return OCRContextInput(
+            rawText: rawText,
+            topCandidates: normalizedCandidates,
+            localeHint: Locale.current.identifier,
+            neighborPhotoHints: neighbors
+        )
     }
     
     // Apple Maps Geocoding (CLGeocoder)
@@ -329,6 +364,7 @@ class RouteReconstructionService {
     /// AI 요약/제목 생성을 위한 경로 통계 스냅샷 빌드
     func buildStatsSnapshot(for route: Route) -> RouteStatsSnapshot {
         let sortedRecords = route.photoRecords.sorted { $0.capturedAt < $1.capturedAt }
+        let currentRoadNames = deduplicatedRoadNames(from: sortedRecords)
         
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -362,11 +398,43 @@ class RouteReconstructionService {
             endName: endName,
             photoCount: route.photoCount,
             dateRange: dateRange,
-            visitedRoadsTopN: Array(route.roadNames.prefix(5)),
+            visitedRoadsTopN: Array(currentRoadNames.prefix(5)),
             timeOfDay: timeOfDay,
-            areaKeywords: route.roadNames,
+            areaKeywords: currentRoadNames,
             userEditedTitle: route.name
         )
+    }
+
+    private func deduplicatedRoadNames(from records: [PhotoRecord]) -> [String] {
+        var seen: Set<String> = []
+        return records.compactMap { normalized($0.roadName) ?? normalized($0.aiQuery) }
+            .filter { roadName in
+                let inserted = seen.insert(roadName).inserted
+                return inserted
+            }
+            .sorted()
+    }
+
+    private func deduplicatedCandidates(from candidates: [String]) -> [String] {
+        var seen: Set<String> = []
+        return candidates.compactMap { candidate in
+            let normalizedCandidate = normalized(candidate)
+            guard let normalizedCandidate, !normalizedCandidate.isEmpty else { return nil }
+            return seen.insert(normalizedCandidate).inserted ? normalizedCandidate : nil
+        }
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    @MainActor
+    private func persistChanges(in modelContext: ModelContext?) {
+        guard let modelContext else { return }
+        try? modelContext.save()
     }
 }
 
