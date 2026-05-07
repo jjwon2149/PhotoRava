@@ -235,6 +235,15 @@ final class LocalAIService {
         }
     }
 
+    struct RouteNarratorResult {
+        let summary: RouteSummary
+        let fallbackError: Error?
+
+        var usedFallback: Bool {
+            fallbackError != nil
+        }
+    }
+
     func isServiceAvailable() async -> Bool {
         availabilityIssue(for: geocodeModel) == nil || availabilityIssue(for: routeSummaryModel) == nil
     }
@@ -307,6 +316,14 @@ final class LocalAIService {
         snapshot: RouteStatsSnapshot,
         tonePreference: RouteSummaryTonePreference = .warm
     ) async throws -> RouteSummary {
+        let result = await routeNarratorResult(snapshot: snapshot, tonePreference: tonePreference)
+        return result.summary
+    }
+
+    func routeNarratorResult(
+        snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference = .warm
+    ) async -> RouteNarratorResult {
         let fallback = fallbackRouteSummary(for: snapshot, tonePreference: tonePreference)
 
         do {
@@ -339,7 +356,7 @@ final class LocalAIService {
                 confidence: summary.confidence,
                 isSuccess: true
             )
-            return summary
+            return RouteNarratorResult(summary: summary, fallbackError: nil)
         } catch {
             var summary = fallback
             validateAndCleanSummary(
@@ -356,7 +373,7 @@ final class LocalAIService {
                 isSuccess: false,
                 error: error
             )
-            return summary
+            return RouteNarratorResult(summary: summary, fallbackError: error)
         }
     }
 

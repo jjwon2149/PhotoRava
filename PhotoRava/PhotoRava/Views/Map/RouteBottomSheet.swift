@@ -21,6 +21,7 @@ struct RouteBottomSheet: View {
     @State private var isAICompletionVisible = false
     @State private var aiErrorMessage: String?
     @State private var aiCaption: String?
+    @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
     
@@ -51,19 +52,15 @@ struct RouteBottomSheet: View {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                HStack(spacing: 8) {
-                                    RouteSummaryToneMenu(selection: $selectedSummaryTone)
-
-                                    Button {
-                                        Task { await generateAISummary() }
-                                    } label: {
-                                        Label("AI 요약", systemImage: "sparkles")
-                                            .font(.caption)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .tint(.purple)
-                                    .controlSize(.small)
+                                Button {
+                                    Task { await generateAISummary() }
+                                } label: {
+                                    Label("AI 요약", systemImage: "sparkles")
+                                        .font(.caption)
                                 }
+                                .buttonStyle(.bordered)
+                                .tint(.purple)
+                                .controlSize(.small)
                             }
                         }
                     }
@@ -108,6 +105,14 @@ struct RouteBottomSheet: View {
                                 .fontWeight(.bold)
                                 .foregroundStyle(.primary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if let diary = aiDiary {
+                                Text(diary)
+                                    .font(.system(size: 14, weight: .regular, design: .serif))
+                                    .lineSpacing(4)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.vertical, 4)
+                            }
                             
                             if !aiHighlights.isEmpty {
                                 HStack(spacing: 6) {
@@ -374,36 +379,42 @@ struct RouteBottomSheet: View {
             }
             
             if #available(iOS 26.0, *) {
-                let summary = try await LocalAIService.shared.routeNarrator(
+                let result = await LocalAIService.shared.routeNarratorResult(
                     snapshot: snapshot,
                     tonePreference: selectedSummaryTone
                 )
                 withAnimation {
                     aiGenerationStatus = "요약과 하이라이트를 반영하는 중..."
-                    viewModel.route.apply(summary: summary)
+                    viewModel.route.apply(summary: result.summary)
                     syncStoredAISummary()
+                    aiErrorMessage = result.fallbackError.map { aiSummaryErrorMessage(for: $0) }
                 }
             } else {
                 // 하위 버전 fallback
                 aiGenerationStatus = "대체 요약을 구성하는 중..."
                 try await Task.sleep(nanoseconds: 800_000_000)
+                let summary = RouteStoredSummary.fallback(
+                    for: snapshot,
+                    tonePreference: selectedSummaryTone
+                )
                 withAnimation {
                     viewModel.route.applyStoredSummary(
-                        title: "✨ [AI] \(snapshot.startName) 여정",
-                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
-                        diary: viewModel.route.aiSummaryDiary,
-                        highlights: ["경로 기록 보완", "요약 생성 완료"],
-                        toneRawValue: selectedSummaryTone.rawValue,
-                        confidence: nil
+                        title: summary.title,
+                        caption: summary.caption,
+                        diary: summary.diary,
+                        highlights: summary.highlights,
+                        toneRawValue: summary.toneRawValue,
+                        confidence: summary.confidence
                     )
                     syncStoredAISummary()
+                    aiErrorMessage = aiSummaryFallbackMessage(for: .requiresIOS26)
                 }
             }
             try? modelContext.save()
             
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 isGeneratingAI = false
-                isAICompletionVisible = true
+                isAICompletionVisible = aiErrorMessage == nil
             }
             
             try? await Task.sleep(for: .milliseconds(1600))
@@ -421,6 +432,7 @@ struct RouteBottomSheet: View {
 
     private func syncStoredAISummary() {
         aiCaption = viewModel.route.aiSummaryCaption
+        aiDiary = viewModel.route.aiSummaryDiary
         aiHighlights = viewModel.route.aiSummaryHighlights
         if let storedTone = RouteSummaryTonePreference(rawValue: viewModel.route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
@@ -452,14 +464,28 @@ struct RouteBottomSheet: View {
     private func aiSummaryErrorMessage(for error: Error) -> String {
         if #available(iOS 26.0, *),
            let localAIError = error as? LocalAIService.LocalAIError {
-            switch localAIError {
-            case .notAvailable(_):
-                return "Apple Intelligence를 사용할 수 없습니다"
-            case .unsupportedLocale, .invalidOutput:
-                break
-            }
+            return aiSummaryFallbackMessage(for: localAIError.availabilityIssue)
         }
-        return "AI 요약 생성에 실패했습니다. 다시 시도해 주세요."
+        return "AI 요약 생성에 실패해 대체 요약을 표시합니다. 잠시 후 다시 시도해 주세요."
+    }
+
+    private func aiSummaryFallbackMessage(for issue: LocalAIAvailabilityIssue) -> String {
+        switch issue {
+        case .requiresIOS26:
+            return "iOS 26 이상에서 Apple Intelligence 요약을 사용할 수 있어 대체 요약을 표시합니다."
+        case .deviceNotEligible:
+            return "이 기기는 Apple Intelligence를 지원하지 않아 대체 요약을 표시합니다."
+        case .appleIntelligenceNotEnabled:
+            return "Apple Intelligence가 꺼져 있어 대체 요약을 표시합니다. 설정에서 활성화한 뒤 다시 시도해 주세요."
+        case .modelNotReady:
+            return "Apple Intelligence 모델 준비가 끝나지 않아 대체 요약을 표시합니다. 준비가 완료되면 다시 시도해 주세요."
+        case .unsupportedLocale:
+            return "현재 언어 설정에서는 Apple Intelligence 요약을 사용할 수 없어 대체 요약을 표시합니다."
+        case .invalidOutput:
+            return "AI 응답 형식이 올바르지 않아 대체 요약을 표시합니다. 다시 시도해 주세요."
+        case .unavailable:
+            return "Apple Intelligence를 사용할 수 없어 대체 요약을 표시합니다."
+        }
     }
 }
 
