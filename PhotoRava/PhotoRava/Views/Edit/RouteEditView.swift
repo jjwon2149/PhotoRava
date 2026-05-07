@@ -81,14 +81,27 @@ struct RouteEditView: View {
                                 if !aiHighlights.isEmpty {
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         HStack(spacing: 6) {
-                                            ForEach(aiHighlights, id: \.self) { highlight in
-                                                Text(highlight)
-                                                    .font(.system(size: 10, weight: .medium))
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 4)
-                                                    .background(Color.purple.opacity(0.1))
-                                                    .foregroundStyle(.purple)
-                                                    .clipShape(Capsule())
+                                            ForEach(aiHighlights.indices, id: \.self) { index in
+                                                HStack(spacing: 4) {
+                                                    Text(aiHighlights[index])
+                                                        .lineLimit(1)
+
+                                                    Button {
+                                                        removeAIHighlight(at: index)
+                                                    } label: {
+                                                        Image(systemName: "xmark.circle.fill")
+                                                            .font(.system(size: 10, weight: .semibold))
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .accessibilityLabel("\(aiHighlights[index]) 하이라이트 삭제")
+                                                }
+                                                .font(.system(size: 10, weight: .medium))
+                                                .padding(.leading, 8)
+                                                .padding(.trailing, 6)
+                                                .padding(.vertical, 4)
+                                                .background(Color.purple.opacity(0.1))
+                                                .foregroundStyle(.purple)
+                                                .clipShape(Capsule())
                                             }
                                         }
                                     }
@@ -265,6 +278,13 @@ struct RouteEditView: View {
         modelContext.delete(route)
         try? modelContext.save()
         dismiss()
+    }
+
+    private func removeAIHighlight(at index: Int) {
+        guard aiHighlights.indices.contains(index) else { return }
+        aiHighlights.remove(at: index)
+        route.aiSummaryHighlights = aiHighlights
+        try? modelContext.save()
     }
 
     private func syncStoredAISummary() {
