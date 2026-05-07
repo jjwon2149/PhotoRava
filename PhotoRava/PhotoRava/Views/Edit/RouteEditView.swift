@@ -22,6 +22,7 @@ struct RouteEditView: View {
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
+    @FocusState private var focusedAISummaryField: AISummaryField?
     
     var body: some View {
         NavigationStack {
@@ -54,7 +55,7 @@ struct RouteEditView: View {
                     .disabled(isGeneratingAI)
                     
                     // AI 요약 결과 및 감성 일기 미리보기
-                    if let caption = aiCaption {
+                    if hasAISummaryContent {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Label("AI의 여행 기록", systemImage: "sparkles")
@@ -65,18 +66,30 @@ struct RouteEditView: View {
                             }
                             
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(caption)
+                                TextField("AI 캡션", text: aiCaptionBinding, axis: .vertical)
                                     .font(.subheadline)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.primary)
+                                    .lineLimit(2...4)
+                                    .submitLabel(.done)
+                                    .focused($focusedAISummaryField, equals: .caption)
+                                    .onSubmit {
+                                        persistAISummaryEdits(saveContext: true)
+                                        focusedAISummaryField = nil
+                                    }
                                 
-                                if let diary = aiDiary {
-                                    Text(diary)
-                                        .font(.system(size: 14, weight: .regular, design: .serif))
-                                        .lineSpacing(4)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.vertical, 4)
-                                }
+                                TextField("AI 일기", text: aiDiaryBinding, axis: .vertical)
+                                    .font(.system(size: 14, weight: .regular, design: .serif))
+                                    .lineSpacing(4)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3...8)
+                                    .submitLabel(.done)
+                                    .focused($focusedAISummaryField, equals: .diary)
+                                    .padding(.vertical, 4)
+                                    .onSubmit {
+                                        persistAISummaryEdits(saveContext: true)
+                                        focusedAISummaryField = nil
+                                    }
                                 
                                 if !aiHighlights.isEmpty {
                                     ScrollView(.horizontal, showsIndicators: false) {
@@ -119,7 +132,7 @@ struct RouteEditView: View {
                         .padding(.vertical, 8)
                     }
                 } footer: {
-                    if aiCaption == nil {
+                    if !hasAISummaryContent {
                         Text("✨ 마법봉을 눌러 AI가 제안하는 매력적인 제목과 일기를 만들어보세요.")
                     }
                 }
@@ -199,7 +212,43 @@ struct RouteEditView: View {
             .task(id: route.id) {
                 syncStoredAISummary()
             }
+            .onChange(of: focusedAISummaryField) { oldValue, newValue in
+                if oldValue != nil, oldValue != newValue {
+                    persistAISummaryEdits(saveContext: true)
+                }
+            }
         }
+    }
+
+    private enum AISummaryField: Hashable {
+        case caption
+        case diary
+    }
+
+    private var hasAISummaryContent: Bool {
+        aiCaption != nil || aiDiary != nil || !aiHighlights.isEmpty
+    }
+
+    private var aiCaptionBinding: Binding<String> {
+        Binding(
+            get: { aiCaption ?? "" },
+            set: { newValue in
+                aiCaption = newValue
+                route.aiSummaryCaption = newValue
+                route.userEditedCaption = normalizedAIText(newValue)
+            }
+        )
+    }
+
+    private var aiDiaryBinding: Binding<String> {
+        Binding(
+            get: { aiDiary ?? "" },
+            set: { newValue in
+                aiDiary = newValue
+                route.aiSummaryDiary = newValue
+                route.userEditedDiaryEntry = normalizedAIText(newValue)
+            }
+        )
     }
     
     private func deleteRecords(at offsets: IndexSet) {
@@ -250,6 +299,7 @@ struct RouteEditView: View {
     
     private func saveChanges() async {
         isRecalculating = true
+        persistAISummaryEdits()
         
         // 파생 데이터 재계산 (Feature 3: 최적화 로직 포함됨)
         await RouteReconstructionService.shared.recalculateRouteData(for: route, modelContext: modelContext)
@@ -274,5 +324,26 @@ struct RouteEditView: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+
+    private func persistAISummaryEdits(saveContext: Bool = false) {
+        let normalizedCaption = normalizedAIText(aiCaption)
+        let normalizedDiary = normalizedAIText(aiDiary)
+
+        route.aiSummaryCaption = normalizedCaption
+        route.aiSummaryDiary = normalizedDiary
+        route.userEditedCaption = normalizedCaption
+        route.userEditedDiaryEntry = normalizedDiary
+        aiCaption = normalizedCaption
+        aiDiary = normalizedDiary
+
+        if saveContext {
+            try? modelContext.save()
+        }
+    }
+
+    private func normalizedAIText(_ value: String?) -> String? {
+        let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedValue.isEmpty ? nil : trimmedValue
     }
 }
