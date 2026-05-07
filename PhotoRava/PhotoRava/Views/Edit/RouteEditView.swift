@@ -21,6 +21,7 @@ struct RouteEditView: View {
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
+    @State private var newHighlightText = ""
     
     var body: some View {
         NavigationStack {
@@ -69,22 +70,29 @@ struct RouteEditView: View {
                                         .padding(.vertical, 4)
                                 }
                                 
-                                if !aiHighlights.isEmpty {
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 6) {
-                                            ForEach(aiHighlights, id: \.self) { highlight in
-                                                Text(highlight)
-                                                    .font(.system(size: 10, weight: .medium))
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 4)
-                                                    .background(Color.purple.opacity(0.1))
-                                                    .foregroundStyle(.purple)
-                                                    .clipShape(Capsule())
-                                            }
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("하이라이트")
+                                        .font(.caption2)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.secondary)
+
+                                    FlowLayout(spacing: 8) {
+                                        ForEach(Array(aiHighlights.enumerated()), id: \.offset) { index, highlight in
+                                            HighlightChip(
+                                                title: highlight,
+                                                onRemove: {
+                                                    removeHighlight(at: index)
+                                                }
+                                            )
                                         }
+
+                                        HighlightInputChip(
+                                            text: $newHighlightText,
+                                            onAdd: addHighlight
+                                        )
                                     }
-                                    .padding(.top, 4)
                                 }
+                                .padding(.top, 4)
                             }
                             .padding(16)
                             .background(
@@ -259,5 +267,101 @@ struct RouteEditView: View {
         aiCaption = route.aiSummaryCaption
         aiDiary = route.aiSummaryDiary
         aiHighlights = route.aiSummaryHighlights
+        newHighlightText = ""
+    }
+
+    private func addHighlight() {
+        let highlight = normalizedHighlight(newHighlightText)
+        guard !highlight.isEmpty else { return }
+
+        let existingKeys = Set(aiHighlights.map { normalizedHighlight($0).lowercased() })
+        guard !existingKeys.contains(highlight.lowercased()) else {
+            newHighlightText = ""
+            return
+        }
+
+        withAnimation {
+            aiHighlights.append(highlight)
+            route.aiSummaryHighlights = aiHighlights
+            newHighlightText = ""
+        }
+    }
+
+    private func removeHighlight(at index: Int) {
+        guard aiHighlights.indices.contains(index) else { return }
+
+        withAnimation {
+            aiHighlights.remove(at: index)
+            route.aiSummaryHighlights = aiHighlights
+        }
+    }
+
+    private func normalizedHighlight(_ text: String) -> String {
+        String(
+            text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .prefix(20)
+        )
+    }
+}
+
+private struct HighlightChip: View {
+    let title: String
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .accessibilityLabel("하이라이트 삭제")
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 6)
+        .padding(.vertical, 5)
+        .background(Color.purple.opacity(0.1))
+        .foregroundStyle(.purple)
+        .clipShape(Capsule())
+    }
+}
+
+private struct HighlightInputChip: View {
+    @Binding var text: String
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .bold))
+
+            TextField("추가", text: $text)
+                .font(.system(size: 11, weight: .medium))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .onSubmit(onAdd)
+                .frame(width: 70)
+
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button(action: onAdd) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .accessibilityLabel("하이라이트 추가")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color(.systemGray6))
+        .foregroundStyle(.secondary)
+        .clipShape(Capsule())
     }
 }
