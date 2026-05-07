@@ -33,18 +33,15 @@ struct ExifStampRootView: View {
 
                 Group {
                     if viewModel.originalImage != nil {
-                        TabView(selection: $selectedTab) {
-                            ExifStampLayoutTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
-                                .tabItem { Label("프레임", systemImage: "rectangle.inset.filled") }
-                                .tag(ExifStampTab.layout)
+                        VStack(spacing: 0) {
+                            ExifStampTabSelector(selectedTab: $selectedTab)
+                                .padding(.horizontal)
+                                .padding(.top, 10)
+                                .padding(.bottom, 8)
 
-                            ExifStampThemeTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
-                                .tabItem { Label("테마", systemImage: "paintpalette") }
-                                .tag(ExifStampTab.theme)
+                            Divider()
 
-                            ExifStampExportTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
-                                .tabItem { Label("내보내기", systemImage: "square.and.arrow.up") }
-                                .tag(ExifStampTab.export)
+                            selectedEditor
                         }
                     } else {
                         emptyStateView
@@ -53,24 +50,25 @@ struct ExifStampRootView: View {
             }
             .navigationTitle("EXIF")
             .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                PhotosPicker(
-                                    selection: $viewModel.selectedItem,
-                                    matching: .images
-                                ) {
-                                    Image(systemName: "photo.badge.plus")
-                                }
-                                .disabled(viewModel.isProcessing)
-                            }
-            
-                            ToolbarItem(placement: .topBarTrailing) {                    PhotosPicker(
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    PhotosPicker(
+                        selection: $viewModel.selectedItem,
+                        matching: .images
+                    ) {
+                        Label("사진 선택", systemImage: "photo.badge.plus")
+                    }
+                    .disabled(viewModel.isProcessing)
+                    .accessibilityHint("EXIF 스탬프를 적용할 사진 한 장을 선택합니다.")
+
+                    PhotosPicker(
                         selection: $viewModel.batchSelectedItems,
                         matching: .images
                     ) {
-                        Image(systemName: "photo.on.rectangle.angled")
+                        Label("여러 장 선택", systemImage: "photo.on.rectangle.angled")
                     }
                     .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
+                    .accessibilityHint("같은 EXIF 스탬프 설정을 적용할 사진 여러 장을 선택합니다.")
                 }
             }
             .overlay(alignment: .top) {
@@ -108,6 +106,9 @@ struct ExifStampRootView: View {
             .onChange(of: viewModel.selectedItem) { _, _ in
                 Task { await viewModel.loadSelectedPhoto() }
             }
+            .onChange(of: selectedTab) { _, _ in
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
             .onChange(of: viewModel.batchSelectedItems) { _, newValue in
                 guard let first = newValue.first else { return }
                 let id = first.itemIdentifier ?? UUID().uuidString
@@ -118,6 +119,18 @@ struct ExifStampRootView: View {
             .fullScreenCover(isPresented: $showingFullScreenPreview) {
                 ExifStampFullScreenPreview(image: viewModel.renderedImage)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var selectedEditor: some View {
+        switch selectedTab {
+        case .layout:
+            ExifStampLayoutTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+        case .theme:
+            ExifStampThemeTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+        case .export:
+            ExifStampExportTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
         }
     }
     
@@ -150,7 +163,7 @@ struct ExifStampRootView: View {
                     selection: $viewModel.selectedItem,
                     matching: .images
                 ) {
-                    Text("사진 선택")
+                    Label("사진 선택", systemImage: "photo.badge.plus")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(width: 200, height: 50)
@@ -158,12 +171,13 @@ struct ExifStampRootView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(viewModel.isProcessing)
+                .accessibilityHint("EXIF 스탬프 편집을 시작할 사진 한 장을 선택합니다.")
 
                 PhotosPicker(
                     selection: $viewModel.batchSelectedItems,
                     matching: .images
                 ) {
-                    Text("여러 장 선택")
+                    Label("여러 장 선택", systemImage: "photo.on.rectangle.angled")
                         .font(.headline)
                         .foregroundStyle(.primary)
                         .frame(width: 200, height: 50)
@@ -171,6 +185,7 @@ struct ExifStampRootView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
+                .accessibilityHint("여러 사진에 같은 EXIF 스탬프 설정을 적용합니다.")
             }
         }
         .padding()
@@ -178,10 +193,61 @@ struct ExifStampRootView: View {
     }
 }
 
-enum ExifStampTab: Hashable {
+enum ExifStampTab: String, CaseIterable, Identifiable {
     case layout
     case theme
     case export
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .layout: return "프레임"
+        case .theme: return "테마"
+        case .export: return "내보내기"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .layout: return "rectangle.inset.filled"
+        case .theme: return "paintpalette"
+        case .export: return "square.and.arrow.up"
+        }
+    }
+
+    func advanced(by offset: Int) -> ExifStampTab {
+        let all = Self.allCases
+        guard let index = all.firstIndex(of: self) else { return self }
+        let next = max(0, min(all.count - 1, index + offset))
+        return all[next]
+    }
+}
+
+private struct ExifStampTabSelector: View {
+    @Binding var selectedTab: ExifStampTab
+
+    var body: some View {
+        Picker("EXIF 편집 단계", selection: $selectedTab) {
+            ForEach(ExifStampTab.allCases) { tab in
+                Label(tab.title, systemImage: tab.systemImage)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("EXIF 편집 단계")
+        .accessibilityValue(selectedTab.title)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                selectedTab = selectedTab.advanced(by: 1)
+            case .decrement:
+                selectedTab = selectedTab.advanced(by: -1)
+            @unknown default:
+                break
+            }
+        }
+    }
 }
 
 enum ExifStampExportTarget: String, CaseIterable, Identifiable {
@@ -239,9 +305,12 @@ private struct ExifStampCropView: View {
     @State private var scale: CGFloat = 1.0
     @State private var lastOffset: CGSize = .zero
     @State private var lastScale: CGFloat = 1.0
+    @State private var lastContainerSize: CGSize = .zero
     
     // Ratios: Width / Height
     @State private var currentRatio: CGFloat? = nil
+
+    private let maxScale: CGFloat = 6.0
     
     var body: some View {
         NavigationStack {
@@ -251,64 +320,78 @@ private struct ExifStampCropView: View {
                     
                     GeometryReader { geo in
                         let containerSize = geo.size
-                        
-                        // Main Image
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .scaleEffect(scale)
-                            .offset(offset)
-                            .background(GeometryReader { imgGeo in
-                                Color.clear.onAppear {
-                                    // Could store image intrinsic layout if needed
+                        let ratio = activeCropRatio
+                        let cropSize = cropWindowSize(containerSize: containerSize, ratio: ratio)
+
+                        ZStack {
+                            Color.clear
+                                .onAppear {
+                                    lastContainerSize = containerSize
+                                    normalizeTransform(imageSize: image.size, containerSize: containerSize, ratio: ratio)
                                 }
-                            })
-                            .gesture(
-                                MagnificationGesture()
-                                    .onChanged { value in
-                                        scale = lastScale * value
-                                    }
-                                    .onEnded { _ in
-                                        lastScale = scale
-                                    }
-                            )
-                            .simultaneousGesture(
-                                DragGesture()
-                                    .onChanged { value in
-                                        offset = CGSize(
-                                            width: lastOffset.width + value.translation.width,
-                                            height: lastOffset.height + value.translation.height
-                                        )
-                                    }
-                                    .onEnded { _ in
-                                        lastOffset = offset
-                                    }
-                            )
-                        
-                        // Crop Window (Overlay)
-                        let ratio = currentRatio ?? (image.size.width / image.size.height)
-                        let cropW = min(containerSize.width * 0.8, containerSize.height * 0.8 * ratio)
-                        let cropH = cropW / ratio
-                        
-                        Rectangle()
-                            .stroke(Color.white, lineWidth: 2)
-                            .frame(width: cropW, height: cropH)
-                            .position(x: containerSize.width / 2, y: containerSize.height / 2)
-                            .shadow(color: .black.opacity(0.5), radius: 10)
+                                .onChange(of: containerSize) { _, newSize in
+                                    lastContainerSize = newSize
+                                    normalizeTransform(imageSize: image.size, containerSize: newSize, ratio: ratio)
+                                }
+
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .scaleEffect(scale)
+                                .offset(offset)
+                                .gesture(
+                                    MagnificationGesture()
+                                        .onChanged { value in
+                                            scale = clampedScale(lastScale * value, imageSize: image.size, containerSize: containerSize, ratio: ratio)
+                                            offset = clampedOffset(offset, imageSize: image.size, containerSize: containerSize, ratio: ratio, scale: scale)
+                                        }
+                                        .onEnded { _ in
+                                            normalizeTransform(imageSize: image.size, containerSize: containerSize, ratio: ratio)
+                                        }
+                                )
+                                .simultaneousGesture(
+                                    DragGesture()
+                                        .onChanged { value in
+                                            let proposed = CGSize(
+                                                width: lastOffset.width + value.translation.width,
+                                                height: lastOffset.height + value.translation.height
+                                            )
+                                            offset = clampedOffset(proposed, imageSize: image.size, containerSize: containerSize, ratio: ratio, scale: scale)
+                                        }
+                                        .onEnded { _ in
+                                            lastOffset = offset
+                                        }
+                                )
+                                .simultaneousGesture(
+                                    TapGesture(count: 2)
+                                        .onEnded {
+                                            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                                resetTransform(imageSize: image.size, containerSize: containerSize, ratio: ratio)
+                                            }
+                                        }
+                                )
+
+                            Rectangle()
+                                .stroke(Color.white, lineWidth: 2)
+                                .frame(width: cropSize.width, height: cropSize.height)
+                                .position(x: containerSize.width / 2, y: containerSize.height / 2)
+                                .shadow(color: .black.opacity(0.5), radius: 10)
+                                .allowsHitTesting(false)
+
+                            VStack {
+                                Spacer()
+                                Text("두 손가락 확대, 드래그 이동, 두 번 탭 초기화")
+                                    .font(.caption)
+                                    .foregroundStyle(.white)
+                                    .padding(8)
+                                    .background(.black.opacity(0.6))
+                                    .clipShape(Capsule())
+                                    .padding(.bottom, 20)
+                            }
+                            .frame(maxWidth: .infinity)
                             .allowsHitTesting(false)
-                        
-                        // Instruction
-                        VStack {
-                            Spacer()
-                            Text("두 손가락으로 확대하고 드래그하여 맞추세요")
-                                .font(.caption)
-                                .foregroundStyle(.white)
-                                .padding(8)
-                                .background(.black.opacity(0.6))
-                                .clipShape(Capsule())
-                                .padding(.bottom, 20)
                         }
-                        .frame(maxWidth: .infinity)
+                        .frame(width: containerSize.width, height: containerSize.height)
                     }
                 }
                 
@@ -328,11 +411,18 @@ private struct ExifStampCropView: View {
             }
             .navigationTitle("이미지 자르기")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: currentRatio) { _, _ in
+                normalizeTransform(imageSize: image.size, containerSize: effectiveContainerSize, ratio: activeCropRatio)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("취소") { dismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("초기화") {
+                        resetTransform(imageSize: image.size, containerSize: effectiveContainerSize, ratio: activeCropRatio)
+                    }
+
                     Button("완료") {
                         calculateAndApplyCrop(imageSize: image.size)
                         dismiss()
@@ -343,43 +433,100 @@ private struct ExifStampCropView: View {
         }
     }
     
-    private func calculateAndApplyCrop(imageSize: CGSize) {
-        // We need the container size to do the math. 
-        // For simplicity in this implementation, we use a fixed estimation or 
-        // ideally we would have captured the GeometryProxy.
-        // Let's use a standard screen-based estimation for now:
-        let screenWidth = UIScreen.main.bounds.width
-        let screenHeight = UIScreen.main.bounds.height - 200 // Approx container height
-        
-        let containerSize = CGSize(width: screenWidth, height: screenHeight)
-        
-        // 1. Calculate the base fitted size of the image in the container (scaledToFit)
-        let hRatio = containerSize.width / imageSize.width
-        let vRatio = containerSize.height / imageSize.height
-        let baseFitRatio = min(hRatio, vRatio)
-        let fittedSize = CGSize(width: imageSize.width * baseFitRatio, height: imageSize.height * baseFitRatio)
-        
-        // 2. Current displayed size after scale
+    private var activeCropRatio: CGFloat {
+        guard image.size.width > 0, image.size.height > 0 else { return currentRatio ?? 1.0 }
+        return currentRatio ?? (image.size.width / image.size.height)
+    }
+
+    private var effectiveContainerSize: CGSize {
+        guard lastContainerSize.width > 0, lastContainerSize.height > 0 else {
+            let bounds = UIScreen.main.bounds
+            return CGSize(width: bounds.width, height: max(1, bounds.height - 200))
+        }
+        return lastContainerSize
+    }
+
+    private func fittedImageSize(imageSize: CGSize, containerSize: CGSize) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return .zero
+        }
+
+        let baseFitRatio = min(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        return CGSize(width: imageSize.width * baseFitRatio, height: imageSize.height * baseFitRatio)
+    }
+
+    private func cropWindowSize(containerSize: CGSize, ratio: CGFloat) -> CGSize {
+        let safeRatio = max(0.1, ratio)
+        let cropW = min(containerSize.width * 0.8, containerSize.height * 0.8 * safeRatio)
+        return CGSize(width: max(1, cropW), height: max(1, cropW / safeRatio))
+    }
+
+    private func minimumScale(imageSize: CGSize, containerSize: CGSize, ratio: CGFloat) -> CGFloat {
+        let fittedSize = fittedImageSize(imageSize: imageSize, containerSize: containerSize)
+        guard fittedSize.width > 0, fittedSize.height > 0 else { return 1.0 }
+
+        let cropSize = cropWindowSize(containerSize: containerSize, ratio: ratio)
+        return min(maxScale, max(1.0, cropSize.width / fittedSize.width, cropSize.height / fittedSize.height))
+    }
+
+    private func clampedScale(_ proposed: CGFloat, imageSize: CGSize, containerSize: CGSize, ratio: CGFloat) -> CGFloat {
+        let minScale = minimumScale(imageSize: imageSize, containerSize: containerSize, ratio: ratio)
+        return min(maxScale, max(minScale, proposed))
+    }
+
+    private func clampedOffset(
+        _ proposed: CGSize,
+        imageSize: CGSize,
+        containerSize: CGSize,
+        ratio: CGFloat,
+        scale: CGFloat
+    ) -> CGSize {
+        let fittedSize = fittedImageSize(imageSize: imageSize, containerSize: containerSize)
+        let cropSize = cropWindowSize(containerSize: containerSize, ratio: ratio)
         let displayedSize = CGSize(width: fittedSize.width * scale, height: fittedSize.height * scale)
-        
-        // 3. Crop Window Size
-        let ratio = currentRatio ?? (imageSize.width / imageSize.height)
-        let cropW = min(containerSize.width * 0.8, containerSize.height * 0.8 * ratio)
-        let cropH = cropW / ratio
-        
-        // 4. Calculate relative offset of the crop window from the image center
-        // Center of image in container is (screenWidth/2 + offset.width, screenHeight/2 + offset.height)
-        // Center of crop window is (screenWidth/2, screenHeight/2)
-        // Relative to image center, crop window center is at (-offset.width, -offset.height)
-        
-        // 5. Convert to normalized CGRect (0.0 to 1.0)
-        let normCropW = cropW / displayedSize.width
-        let normCropH = cropH / displayedSize.height
-        
-        let normX = (1.0 - normCropW) / 2 - (offset.width / displayedSize.width)
-        let normY = (1.0 - normCropH) / 2 - (offset.height / displayedSize.height)
-        
+        let maxX = max(0, (displayedSize.width - cropSize.width) / 2)
+        let maxY = max(0, (displayedSize.height - cropSize.height) / 2)
+
+        return CGSize(
+            width: min(max(proposed.width, -maxX), maxX),
+            height: min(max(proposed.height, -maxY), maxY)
+        )
+    }
+
+    private func normalizeTransform(imageSize: CGSize, containerSize: CGSize, ratio: CGFloat) {
+        scale = clampedScale(scale, imageSize: imageSize, containerSize: containerSize, ratio: ratio)
+        offset = clampedOffset(offset, imageSize: imageSize, containerSize: containerSize, ratio: ratio, scale: scale)
+        lastScale = scale
+        lastOffset = offset
+    }
+
+    private func resetTransform(imageSize: CGSize, containerSize: CGSize, ratio: CGFloat) {
+        scale = minimumScale(imageSize: imageSize, containerSize: containerSize, ratio: ratio)
+        offset = .zero
+        lastScale = scale
+        lastOffset = .zero
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func calculateAndApplyCrop(imageSize: CGSize) {
+        let containerSize = effectiveContainerSize
+        let ratio = activeCropRatio
+        normalizeTransform(imageSize: imageSize, containerSize: containerSize, ratio: ratio)
+
+        let fittedSize = fittedImageSize(imageSize: imageSize, containerSize: containerSize)
+        let displayedSize = CGSize(width: fittedSize.width * scale, height: fittedSize.height * scale)
+        guard displayedSize.width > 0, displayedSize.height > 0 else { return }
+
+        let cropSize = cropWindowSize(containerSize: containerSize, ratio: ratio)
+        let normCropW = min(1, cropSize.width / displayedSize.width)
+        let normCropH = min(1, cropSize.height / displayedSize.height)
+        let maxX = max(0, 1 - normCropW)
+        let maxY = max(0, 1 - normCropH)
+        let normX = min(max((1.0 - normCropW) / 2 - (offset.width / displayedSize.width), 0), maxX)
+        let normY = min(max((1.0 - normCropH) / 2 - (offset.height / displayedSize.height), 0), maxY)
+
         cropRect = CGRect(x: normX, y: normY, width: normCropW, height: normCropH)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
     
     struct RatioButton: View {
@@ -390,6 +537,7 @@ private struct ExifStampCropView: View {
         var body: some View {
             Button {
                 current = ratio
+                UISelectionFeedbackGenerator().selectionChanged()
             } label: {
                 Text(label)
                     .padding(.horizontal, 16)
@@ -398,6 +546,8 @@ private struct ExifStampCropView: View {
                     .foregroundStyle(current == ratio ? .white : .primary)
                     .clipShape(Capsule())
             }
+            .accessibilityLabel("자르기 비율 \(label)")
+            .accessibilityValue(current == ratio ? "선택됨" : "")
         }
     }
 }
@@ -477,6 +627,7 @@ private struct ExifStampLayoutTab: View {
     @State private var tempPaddingBottom: Double = 0
     @State private var tempPaddingLeft: Double = 0
     @State private var tempPaddingRight: Double = 0
+    @State private var copiedCaptionFeedback = false
 
     private var previewScale: CGFloat {
         if scrollOffset <= 0 { return 1.0 }
@@ -620,14 +771,33 @@ private struct ExifStampLayoutTab: View {
                             }
                         }
 
-                        if let line1 = viewModel.captionLines.line1 ?? viewModel.captionLines.line2 {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("문구 미리보기")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(line1)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                        if !captionPreviewLines.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text("문구 미리보기")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    Spacer()
+
+                                    Button {
+                                        copyCaptionPreview()
+                                    } label: {
+                                        Label(copiedCaptionFeedback ? "복사됨" : "복사", systemImage: copiedCaptionFeedback ? "checkmark" : "doc.on.doc")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .accessibilityHint("현재 EXIF 스탬프 문구를 클립보드에 복사합니다.")
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(captionPreviewLines, id: \.self) { line in
+                                        Text(line)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                }
                             }
                         }
                     }
@@ -693,6 +863,25 @@ private struct ExifStampLayoutTab: View {
         }
     }
 
+    private var captionPreviewLines: [String] {
+        [viewModel.captionLines.line1, viewModel.captionLines.line2]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func copyCaptionPreview() {
+        let text = captionPreviewLines.joined(separator: "\n")
+        guard !text.isEmpty else { return }
+
+        UIPasteboard.general.string = text
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        copiedCaptionFeedback = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            copiedCaptionFeedback = false
+        }
+    }
+
     private func paddingSlider(label: String, binding: Binding<Double>, onCommit: @escaping (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -735,7 +924,7 @@ private struct ExifStampLayoutTab: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { _, source in
+                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { idx, source in
                         Button {
                             Task { await viewModel.loadBatchPreviewSource(source) }
                         } label: {
@@ -772,6 +961,9 @@ private struct ExifStampLayoutTab: View {
                         .task(id: source.identifier) {
                             _ = await viewModel.thumbnailImage(for: source)
                         }
+                        .accessibilityLabel("사진 \(idx + 1) 미리보기")
+                        .accessibilityValue(viewModel.activePhotoIdentifier == source.identifier ? "선택됨" : "")
+                        .accessibilityHint("이 사진을 편집 미리보기로 불러옵니다.")
                     }
                 }
                 .padding(.vertical, 2)
@@ -800,6 +992,7 @@ private struct ExifStampThemeTab: View {
     
     @State private var scrollOffset: CGFloat = 0
     @State private var showingSettingsImporter = false
+    @State private var showingResetAllConfirmation = false
 
     private var previewScale: CGFloat {
         if scrollOffset <= 0 { return 1.0 }
@@ -881,7 +1074,7 @@ private struct ExifStampThemeTab: View {
                             .buttonStyle(.bordered)
 
                             Button(role: .destructive) {
-                                viewModel.resetAllSettings()
+                                showingResetAllConfirmation = true
                             } label: {
                                 Label("전체 리셋", systemImage: "trash")
                                     .frame(maxWidth: .infinity)
@@ -946,6 +1139,14 @@ private struct ExifStampThemeTab: View {
             .frame(height: 300)
             .zIndex(1)
             .allowsHitTesting(previewScale > 0.5)
+        }
+        .confirmationDialog("전체 설정을 초기화할까요?", isPresented: $showingResetAllConfirmation, titleVisibility: .visible) {
+            Button("전체 리셋", role: .destructive) {
+                viewModel.resetAllSettings()
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("테마, 표시 항목, 내보내기 설정이 기본값으로 돌아갑니다.")
         }
     }
 }
@@ -1306,7 +1507,7 @@ private struct ExifStampExportTab: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { _, source in
+                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { idx, source in
                         Button {
                             selectedBatchPreviewIdentifier = source.identifier
                             Task { await viewModel.loadBatchPreviewSource(source) }
@@ -1344,6 +1545,9 @@ private struct ExifStampExportTab: View {
                         .task(id: source.identifier) {
                             _ = await viewModel.thumbnailImage(for: source)
                         }
+                        .accessibilityLabel("사진 \(idx + 1) 프리뷰")
+                        .accessibilityValue(selectedBatchPreviewIdentifier == source.identifier ? "선택됨" : "")
+                        .accessibilityHint("내보내기 전에 이 사진의 스탬프 미리보기를 확인합니다.")
                     }
                 }
                 .padding(.vertical, 2)
@@ -1407,6 +1611,7 @@ final class ExifStampViewModel: ObservableObject {
     private let batchExportQueue = DispatchQueue(label: "PhotoRava.ExifStampBatchExportQueue", qos: .userInitiated, attributes: .concurrent)
     @Published private(set) var batchSources: [BatchSource] = []
     @Published private(set) var thumbnailCache: [String: UIImage] = [:]
+    private var metadataCache: [String: ExifStampMetadata] = [:]
     private var lastBatchSources: [BatchSource] = []
     private var lastBatchSnapshot: BatchSnapshot?
     private var lastBatchMode: ExifStampBatchExportState.Mode?
@@ -1499,11 +1704,7 @@ final class ExifStampViewModel: ObservableObject {
 
         originalImage = image
         originalImageData = data
-        if let data {
-            metadata = ExifStampMetadataService.shared.extract(from: data, fallbackAsset: asset)
-        } else {
-            metadata = ExifStampMetadata(capturedAt: asset?.creationDate)
-        }
+        metadata = await metadataFor(data: data, asset: asset, identifier: id)
         // 메인 스레드에서 즉시 렌더링 호출
         await MainActor.run {
             self.scheduleRender()
@@ -1797,17 +1998,40 @@ final class ExifStampViewModel: ObservableObject {
             }
             
             originalImageData = data
-            
-            if let data {
-                metadata = ExifStampMetadataService.shared.extract(from: data, fallbackAsset: asset)
-            } else {
-                metadata = ExifStampMetadata(capturedAt: asset?.creationDate)
-            }
+            metadata = await metadataFor(data: data, asset: asset, identifier: identifier)
             
             scheduleRender()
         } catch {
             showError(error.localizedDescription)
         }
+    }
+
+    private func metadataFor(data: Data?, asset: PHAsset?, identifier: String?) async -> ExifStampMetadata {
+        guard let data else {
+            return ExifStampMetadata(capturedAt: asset?.creationDate)
+        }
+
+        let cacheKey = metadataCacheKey(identifier: identifier, data: data, asset: asset)
+        if let cacheKey, let cached = metadataCache[cacheKey] {
+            return cached
+        }
+
+        let fallbackCapturedAt = asset?.creationDate
+        let parsed = await Task.detached(priority: .userInitiated) {
+            ExifStampMetadataService.shared.extract(from: data, fallbackCapturedAt: fallbackCapturedAt)
+        }.value
+
+        if let cacheKey {
+            metadataCache[cacheKey] = parsed
+        }
+        return parsed
+    }
+
+    private func metadataCacheKey(identifier: String?, data: Data, asset: PHAsset?) -> String? {
+        guard let identifier else { return nil }
+        let assetVersion = asset?.modificationDate ?? asset?.creationDate
+        let version = assetVersion?.timeIntervalSinceReferenceDate ?? 0
+        return "\(identifier)|\(data.count)|\(version)"
     }
 
     func scheduleRender() {
@@ -2251,14 +2475,15 @@ final class ExifStampViewModel: ObservableObject {
         snapshot: BatchSnapshot,
         identifier: String
     ) async -> ExportedData? {
-        await withCheckedContinuation { continuation in
+        let fallbackCapturedAt = asset?.creationDate
+        return await withCheckedContinuation { continuation in
             batchExportQueue.async {
                 let exported: ExportedData? = autoreleasepool {
                     let metadata: ExifStampMetadata = {
                         if let originalData {
-                            return ExifStampMetadataService.shared.extract(from: originalData, fallbackAsset: asset)
+                            return ExifStampMetadataService.shared.extract(from: originalData, fallbackCapturedAt: fallbackCapturedAt)
                         }
-                        return ExifStampMetadata(capturedAt: asset?.creationDate)
+                        return ExifStampMetadata(capturedAt: fallbackCapturedAt)
                     }()
 
                     let lines = ExifStampMetadataService.formatCaptionLines(

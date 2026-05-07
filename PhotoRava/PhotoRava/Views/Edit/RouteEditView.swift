@@ -18,6 +18,9 @@ struct RouteEditView: View {
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
+    @State private var aiGenerationStatus = "AI가 경로를 요약하는 중..."
+    @State private var isAICompletionVisible = false
+    @State private var recalculationStatus = "변경 사항 저장 중..."
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
@@ -42,6 +45,27 @@ struct RouteEditView: View {
                             }
                             .buttonStyle(.borderless)
                         }
+                    }
+                    
+                    if isGeneratingAI {
+                        RouteAIActivityPanel(
+                            title: "AI 여행 기록 생성 중",
+                            message: aiGenerationStatus,
+                            showsSkeleton: true
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    } else if isAICompletionVisible {
+                        RouteAICompletionBadge(message: "AI 여행 기록이 완성되었습니다")
+                            .transition(.scale(scale: 0.94).combined(with: .opacity))
+                    }
+                    
+                    if isRecalculating {
+                        RouteAIActivityPanel(
+                            title: "경로 변경 사항 저장 중",
+                            message: recalculationStatus,
+                            showsSkeleton: false
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     
                     // AI 요약 결과 및 감성 일기 미리보기
@@ -105,12 +129,13 @@ struct RouteEditView: View {
                                 .buttonStyle(.bordered)
                                 .tint(.purple)
                                 .controlSize(.mini)
+                                .disabled(isGeneratingAI)
                             }
                         }
                         .padding(.vertical, 8)
                     }
                 } footer: {
-                    if aiCaption == nil {
+                    if aiCaption == nil && !isGeneratingAI {
                         Text("✨ 마법봉을 눌러 AI가 제안하는 매력적인 제목과 일기를 만들어보세요.")
                     }
                 }
@@ -203,20 +228,28 @@ struct RouteEditView: View {
     
     @MainActor
     private func generateAISummary() async {
+        guard !isGeneratingAI else { return }
         isGeneratingAI = true
-        defer { isGeneratingAI = false }
+        aiGenerationStatus = "경로 통계를 정리하는 중..."
+        isAICompletionVisible = false
         
         let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
         
         do {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                aiGenerationStatus = "AI가 경로를 요약하는 중..."
+            }
+            
             if #available(iOS 26.0, *) {
                 let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
                 withAnimation {
+                    aiGenerationStatus = "제목과 여행 기록을 반영하는 중..."
                     self.route.apply(summary: summary)
                     syncStoredAISummary()
                 }
             } else {
                 // 하위 버전 fallback
+                aiGenerationStatus = "대체 요약을 구성하는 중..."
                 try await Task.sleep(nanoseconds: 1_000_000_000)
                 withAnimation {
                     self.route.applyStoredSummary(
@@ -231,18 +264,33 @@ struct RouteEditView: View {
                 }
             }
             try? modelContext.save()
+            
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                isGeneratingAI = false
+                isAICompletionVisible = true
+            }
+            
+            try? await Task.sleep(for: .milliseconds(1600))
+            withAnimation(.easeOut(duration: 0.25)) {
+                isAICompletionVisible = false
+            }
         } catch {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isGeneratingAI = false
+            }
             print("AI summary generation failed: \(error.localizedDescription)")
         }
     }
     
     private func saveChanges() async {
         isRecalculating = true
+        recalculationStatus = routeHasAIGeocodeCandidates ? "AI 위치 보정 후보를 확인하는 중..." : "경로 통계를 다시 계산하는 중..."
         
         // 파생 데이터 재계산 (Feature 3: 최적화 로직 포함됨)
         await RouteReconstructionService.shared.recalculateRouteData(for: route, modelContext: modelContext)
         
         // SwiftData에 저장
+        recalculationStatus = "SwiftData에 변경 사항을 저장하는 중..."
         try? modelContext.save()
         
         isRecalculating = false
@@ -259,5 +307,23 @@ struct RouteEditView: View {
         aiCaption = route.aiSummaryCaption
         aiDiary = route.aiSummaryDiary
         aiHighlights = route.aiSummaryHighlights
+    }
+    
+    private var routeHasAIGeocodeCandidates: Bool {
+        route.photoRecords.contains { record in
+            guard record.latitude == nil || record.longitude == nil else { return false }
+            
+            if let roadName = record.roadName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !roadName.isEmpty {
+                return true
+            }
+            
+            if let rawOCRText = record.rawOCRText?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !rawOCRText.isEmpty {
+                return true
+            }
+            
+            return !record.topOCRCandidates.isEmpty
+        }
     }
 }

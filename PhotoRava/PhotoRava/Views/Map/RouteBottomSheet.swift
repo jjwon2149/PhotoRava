@@ -17,6 +17,8 @@ struct RouteBottomSheet: View {
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
+    @State private var aiGenerationStatus = "AI가 경로를 요약하는 중..."
+    @State private var isAICompletionVisible = false
     @State private var aiCaption: String?
     @State private var aiHighlights: [String] = []
     
@@ -69,6 +71,20 @@ struct RouteBottomSheet: View {
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    
+                    if isGeneratingAI {
+                        RouteAIActivityPanel(
+                            title: "AI 요약 생성 중",
+                            message: aiGenerationStatus,
+                            showsSkeleton: true
+                        )
+                        .padding(.top, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    } else if isAICompletionVisible {
+                        RouteAICompletionBadge(message: "AI 요약이 완성되었습니다")
+                            .padding(.top, 8)
+                            .transition(.scale(scale: 0.94).combined(with: .opacity))
+                    }
                     
                     // AI 요약 결과 표시
                     if let caption = aiCaption {
@@ -282,20 +298,28 @@ struct RouteBottomSheet: View {
     
     @MainActor
     private func generateAISummary() async {
+        guard !isGeneratingAI else { return }
         isGeneratingAI = true
-        defer { isGeneratingAI = false }
+        aiGenerationStatus = "경로 통계를 정리하는 중..."
+        isAICompletionVisible = false
         
         let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: viewModel.route)
         
         do {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                aiGenerationStatus = "AI가 경로를 요약하는 중..."
+            }
+            
             if #available(iOS 26.0, *) {
                 let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
                 withAnimation {
+                    aiGenerationStatus = "요약과 하이라이트를 반영하는 중..."
                     viewModel.route.apply(summary: summary)
                     syncStoredAISummary()
                 }
             } else {
                 // 하위 버전 fallback
+                aiGenerationStatus = "대체 요약을 구성하는 중..."
                 try await Task.sleep(nanoseconds: 800_000_000)
                 withAnimation {
                     viewModel.route.applyStoredSummary(
@@ -310,7 +334,20 @@ struct RouteBottomSheet: View {
                 }
             }
             try? modelContext.save()
+            
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                isGeneratingAI = false
+                isAICompletionVisible = true
+            }
+            
+            try? await Task.sleep(for: .milliseconds(1600))
+            withAnimation(.easeOut(duration: 0.25)) {
+                isAICompletionVisible = false
+            }
         } catch {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isGeneratingAI = false
+            }
             print("AI Summary Generation Failed: \(error.localizedDescription)")
         }
     }
@@ -361,6 +398,166 @@ struct StatCard: View {
         .padding(16)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct RouteAIActivityPanel: View {
+    let title: String
+    let message: String
+    let showsSkeleton: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.purple.opacity(0.12))
+                        .frame(width: 30, height: 30)
+                    
+                    Image(systemName: "sparkles")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.purple)
+                }
+                
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.purple)
+                    
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+                
+                Spacer(minLength: 8)
+                
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.purple)
+            }
+            
+            if showsSkeleton {
+                VStack(alignment: .leading, spacing: 8) {
+                    RouteAIShimmerLine(widthRatio: 0.88)
+                    RouteAIShimmerLine(widthRatio: 0.68)
+                    RouteAIShimmerLine(widthRatio: 0.78)
+                    
+                    HStack(spacing: 6) {
+                        RouteAIShimmerCapsule(width: 74)
+                        RouteAIShimmerCapsule(width: 92)
+                        RouteAIShimmerCapsule(width: 64)
+                    }
+                    .padding(.top, 2)
+                }
+                .accessibilityHidden(true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.purple.opacity(0.07))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.purple.opacity(0.16), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct RouteAICompletionBadge: View {
+    let message: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color.primaryBlue)
+            
+            Text(message)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.primaryBlue.opacity(0.1))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct RouteAIShimmerLine: View {
+    let widthRatio: CGFloat
+    @State private var isAnimating = false
+    
+    var body: some View {
+        GeometryReader { geometry in
+            shimmerBase(cornerRadius: 4)
+                .frame(width: max(geometry.size.width * widthRatio, 52), height: 10)
+                .overlay(shimmerOverlay(width: geometry.size.width))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .frame(height: 10)
+        .onAppear(perform: startAnimation)
+    }
+    
+    private func shimmerBase(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(Color(.systemGray5))
+    }
+    
+    private func shimmerOverlay(width: CGFloat) -> some View {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0),
+                Color.white.opacity(0.72),
+                Color.white.opacity(0)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(width: max(width * 0.45, 80), height: 24)
+        .rotationEffect(.degrees(8))
+        .offset(x: isAnimating ? width : -width)
+    }
+    
+    private func startAnimation() {
+        isAnimating = false
+        withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+            isAnimating = true
+        }
+    }
+}
+
+private struct RouteAIShimmerCapsule: View {
+    let width: CGFloat
+    @State private var isAnimating = false
+    
+    var body: some View {
+        Capsule()
+            .fill(Color(.systemGray5))
+            .frame(width: width, height: 20)
+            .overlay(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0),
+                        Color.white.opacity(0.72),
+                        Color.white.opacity(0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 56, height: 28)
+                .rotationEffect(.degrees(8))
+                .offset(x: isAnimating ? width : -width)
+            )
+            .clipShape(Capsule())
+            .onAppear {
+                isAnimating = false
+                withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                    isAnimating = true
+                }
+            }
     }
 }
 

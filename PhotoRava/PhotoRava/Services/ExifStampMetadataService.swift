@@ -20,7 +20,7 @@ struct ExifStampMetadata: Equatable {
     var focalLengthMm: Double?
 }
 
-final class ExifStampMetadataService {
+final class ExifStampMetadataService: @unchecked Sendable {
     static let shared = ExifStampMetadataService()
     private init() {}
 
@@ -36,8 +36,12 @@ final class ExifStampMetadataService {
     }
     
     func extract(from imageData: Data, fallbackAsset: PHAsset?) -> ExifStampMetadata {
+        extract(from: imageData, fallbackCapturedAt: fallbackAsset?.creationDate)
+    }
+
+    func extract(from imageData: Data, fallbackCapturedAt: Date?) -> ExifStampMetadata {
         var result = ExifStampMetadata()
-        result.capturedAt = fallbackAsset?.creationDate
+        result.capturedAt = fallbackCapturedAt
         
         guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else {
