@@ -31,30 +31,26 @@ struct RouteEditView: View {
                         TextField("경로 이름", text: $route.name)
                             .font(.headline)
                         
-                        if isGeneratingAI {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Button {
-                                Task { await generateAISummary() }
-                            } label: {
-                                Image(systemName: "sparkles")
-                                    .foregroundStyle(.purple)
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
+                        if visibleAICaption == nil {
+                            if isGeneratingAI {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                RouteSummaryToneMenu(selection: $selectedSummaryTone)
 
-                    Picker("AI 톤", selection: $selectedSummaryTone) {
-                        ForEach(RouteSummaryTonePreference.allCases) { tone in
-                            Text(tone.displayName).tag(tone)
+                                Button {
+                                    Task { await generateAISummary() }
+                                } label: {
+                                    Image(systemName: "sparkles")
+                                        .foregroundStyle(.purple)
+                                }
+                                .buttonStyle(.borderless)
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .disabled(isGeneratingAI)
                     
                     // AI 요약 결과 및 감성 일기 미리보기
-                    if let caption = aiCaption {
+                    if let caption = visibleAICaption {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Label("AI의 여행 기록", systemImage: "sparkles")
@@ -81,14 +77,27 @@ struct RouteEditView: View {
                                 if !aiHighlights.isEmpty {
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         HStack(spacing: 6) {
-                                            ForEach(aiHighlights, id: \.self) { highlight in
-                                                Text(highlight)
-                                                    .font(.system(size: 10, weight: .medium))
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 4)
-                                                    .background(Color.purple.opacity(0.1))
-                                                    .foregroundStyle(.purple)
-                                                    .clipShape(Capsule())
+                                            ForEach(aiHighlights.indices, id: \.self) { index in
+                                                HStack(spacing: 4) {
+                                                    Text(aiHighlights[index])
+                                                        .lineLimit(1)
+
+                                                    Button {
+                                                        removeAIHighlight(at: index)
+                                                    } label: {
+                                                        Image(systemName: "xmark.circle.fill")
+                                                            .font(.system(size: 10, weight: .semibold))
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .accessibilityLabel("\(aiHighlights[index]) 하이라이트 삭제")
+                                                }
+                                                .font(.system(size: 10, weight: .medium))
+                                                .padding(.leading, 8)
+                                                .padding(.trailing, 6)
+                                                .padding(.vertical, 4)
+                                                .background(Color.purple.opacity(0.1))
+                                                .foregroundStyle(.purple)
+                                                .clipShape(Capsule())
                                             }
                                         }
                                     }
@@ -104,6 +113,11 @@ struct RouteEditView: View {
                             
                             HStack {
                                 Spacer()
+                                RouteSummaryToneMenu(
+                                    selection: $selectedSummaryTone,
+                                    isDisabled: isGeneratingAI
+                                )
+
                                 Button {
                                     Task { await generateAISummary() }
                                 } label: {
@@ -119,7 +133,7 @@ struct RouteEditView: View {
                         .padding(.vertical, 8)
                     }
                 } footer: {
-                    if aiCaption == nil {
+                    if visibleAICaption == nil {
                         Text("✨ 마법봉을 눌러 AI가 제안하는 매력적인 제목과 일기를 만들어보세요.")
                     }
                 }
@@ -201,6 +215,15 @@ struct RouteEditView: View {
             }
         }
     }
+
+    private var visibleAICaption: String? {
+        guard let caption = aiCaption?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !caption.isEmpty else {
+            return nil
+        }
+
+        return caption
+    }
     
     private func deleteRecords(at offsets: IndexSet) {
         route.photoRecords.remove(atOffsets: offsets)
@@ -267,6 +290,13 @@ struct RouteEditView: View {
         dismiss()
     }
 
+    private func removeAIHighlight(at index: Int) {
+        guard aiHighlights.indices.contains(index) else { return }
+        aiHighlights.remove(at: index)
+        route.aiSummaryHighlights = aiHighlights
+        try? modelContext.save()
+    }
+
     private func syncStoredAISummary() {
         aiCaption = route.aiSummaryCaption
         aiDiary = route.aiSummaryDiary
@@ -274,5 +304,30 @@ struct RouteEditView: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+}
+
+struct RouteSummaryToneMenu: View {
+    @Binding var selection: RouteSummaryTonePreference
+    var isDisabled = false
+
+    var body: some View {
+        Menu {
+            Picker("AI 톤", selection: $selection) {
+                ForEach(RouteSummaryTonePreference.allCases) { tone in
+                    Text(tone.displayName).tag(tone)
+                }
+            }
+        } label: {
+            Label(selection.displayName, systemImage: "text.bubble")
+                .font(.caption2)
+                .fontWeight(.medium)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        .tint(.purple)
+        .disabled(isDisabled)
+        .accessibilityLabel("AI 톤")
+        .accessibilityValue(selection.displayName)
     }
 }

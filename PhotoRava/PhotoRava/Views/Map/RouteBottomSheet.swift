@@ -19,6 +19,7 @@ struct RouteBottomSheet: View {
     @State private var isGeneratingAI = false
     @State private var aiGenerationStatus = "AI가 경로를 요약하는 중..."
     @State private var isAICompletionVisible = false
+    @State private var aiErrorMessage: String?
     @State private var aiCaption: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
@@ -45,19 +46,25 @@ struct RouteBottomSheet: View {
                         
                         Spacer()
                         
-                        if isGeneratingAI {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else if aiCaption == nil {
-                            Button {
-                                Task { await generateAISummary() }
-                            } label: {
-                                Label("AI 요약", systemImage: "sparkles")
-                                    .font(.caption)
+                        if visibleAICaption == nil {
+                            if isGeneratingAI {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                HStack(spacing: 8) {
+                                    RouteSummaryToneMenu(selection: $selectedSummaryTone)
+
+                                    Button {
+                                        Task { await generateAISummary() }
+                                    } label: {
+                                        Label("AI 요약", systemImage: "sparkles")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.purple)
+                                    .controlSize(.small)
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .tint(.purple)
-                            .controlSize(.small)
                         }
                     }
                     
@@ -72,14 +79,6 @@ struct RouteBottomSheet: View {
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-
-                    Picker("AI 톤", selection: $selectedSummaryTone) {
-                        ForEach(RouteSummaryTonePreference.allCases) { tone in
-                            Text(tone.displayName).tag(tone)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isGeneratingAI)
                     
                     if isGeneratingAI {
                         RouteAIActivityPanel(
@@ -94,16 +93,56 @@ struct RouteBottomSheet: View {
                             .padding(.top, 8)
                             .transition(.scale(scale: 0.94).combined(with: .opacity))
                     }
+
+                    if let aiErrorMessage {
+                        RouteAIErrorBanner(message: aiErrorMessage)
+                            .padding(.top, 8)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                     
                     // AI 요약 결과 표시
-                    if let caption = aiCaption {
+                    if let caption = visibleAICaption {
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(caption)
-                                    .font(.subheadline)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(caption)
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            if !aiHighlights.isEmpty {
+                                HStack(spacing: 6) {
+                                    ForEach(aiHighlights.indices, id: \.self) { index in
+                                        HStack(spacing: 4) {
+                                            Text(aiHighlights[index])
+                                                .lineLimit(1)
+
+                                            Button {
+                                                removeAIHighlight(at: index)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("\(aiHighlights[index]) 하이라이트 삭제")
+                                        }
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .padding(.leading, 8)
+                                        .padding(.trailing, 6)
+                                        .padding(.vertical, 4)
+                                        .background(Color.purple.opacity(0.1))
+                                        .foregroundStyle(.purple)
+                                        .clipShape(Capsule())
+                                    }
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                Spacer()
+
+                                RouteSummaryToneMenu(
+                                    selection: $selectedSummaryTone,
+                                    isDisabled: isGeneratingAI
+                                )
 
                                 if isGeneratingAI {
                                     ProgressView()
@@ -112,24 +151,13 @@ struct RouteBottomSheet: View {
                                     Button {
                                         Task { await generateAISummary() }
                                     } label: {
-                                        Image(systemName: "arrow.clockwise")
+                                        Label("다시 만들기", systemImage: "arrow.clockwise")
+                                            .font(.caption2)
+                                            .fontWeight(.medium)
                                     }
-                                    .buttonStyle(.borderless)
+                                    .buttonStyle(.bordered)
                                     .tint(.purple)
-                                }
-                            }
-                            
-                            if !aiHighlights.isEmpty {
-                                HStack(spacing: 6) {
-                                    ForEach(aiHighlights, id: \.self) { highlight in
-                                        Text(highlight)
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.purple.opacity(0.1))
-                                            .foregroundStyle(.purple)
-                                            .clipShape(Capsule())
-                                    }
+                                    .controlSize(.mini)
                                 }
                             }
                         }
@@ -212,6 +240,15 @@ struct RouteBottomSheet: View {
         .task(id: viewModel.route.id) {
             syncStoredAISummary()
         }
+    }
+
+    private var visibleAICaption: String? {
+        guard let caption = aiCaption?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !caption.isEmpty else {
+            return nil
+        }
+
+        return caption
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
@@ -325,6 +362,7 @@ struct RouteBottomSheet: View {
     private func generateAISummary() async {
         guard !isGeneratingAI else { return }
         isGeneratingAI = true
+        aiErrorMessage = nil
         aiGenerationStatus = "경로 통계를 정리하는 중..."
         isAICompletionVisible = false
         
@@ -375,6 +413,7 @@ struct RouteBottomSheet: View {
         } catch {
             withAnimation(.easeOut(duration: 0.2)) {
                 isGeneratingAI = false
+                aiErrorMessage = aiSummaryErrorMessage(for: error)
             }
             print("AI Summary Generation Failed: \(error.localizedDescription)")
         }
@@ -386,6 +425,13 @@ struct RouteBottomSheet: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: viewModel.route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+
+    private func removeAIHighlight(at index: Int) {
+        guard aiHighlights.indices.contains(index) else { return }
+        aiHighlights.remove(at: index)
+        viewModel.route.aiSummaryHighlights = aiHighlights
+        try? modelContext.save()
     }
 
     private func routeShareSummaryText() -> String {
@@ -401,6 +447,19 @@ struct RouteBottomSheet: View {
         }
 
         return parts.joined(separator: "\n")
+    }
+
+    private func aiSummaryErrorMessage(for error: Error) -> String {
+        if #available(iOS 26.0, *),
+           let localAIError = error as? LocalAIService.LocalAIError {
+            switch localAIError {
+            case .notAvailable(_):
+                return "Apple Intelligence를 사용할 수 없습니다"
+            case .unsupportedLocale, .invalidOutput:
+                break
+            }
+        }
+        return "AI 요약 생성에 실패했습니다. 다시 시도해 주세요."
     }
 }
 
@@ -513,6 +572,33 @@ struct RouteAICompletionBadge: View {
         .padding(.vertical, 7)
         .background(Color.primaryBlue.opacity(0.1))
         .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct RouteAIErrorBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+
+            Text(message)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.red.opacity(0.2), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
 }
