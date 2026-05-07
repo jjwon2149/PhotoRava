@@ -51,19 +51,15 @@ struct RouteBottomSheet: View {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                HStack(spacing: 8) {
-                                    RouteSummaryToneMenu(selection: $selectedSummaryTone)
-
-                                    Button {
-                                        Task { await generateAISummary() }
-                                    } label: {
-                                        Label("AI 요약", systemImage: "sparkles")
-                                            .font(.caption)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .tint(.purple)
-                                    .controlSize(.small)
+                                Button {
+                                    Task { await generateAISummary() }
+                                } label: {
+                                    Label("AI 요약", systemImage: "sparkles")
+                                        .font(.caption)
                                 }
+                                .buttonStyle(.bordered)
+                                .tint(.purple)
+                                .controlSize(.small)
                             }
                         }
                     }

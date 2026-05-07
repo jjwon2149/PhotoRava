@@ -36,8 +36,6 @@ struct RouteEditView: View {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                RouteSummaryToneMenu(selection: $selectedSummaryTone)
-
                                 Button {
                                     Task { await generateAISummary() }
                                 } label: {
