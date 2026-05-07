@@ -253,14 +253,18 @@ struct RouteEditView: View {
             } else {
                 // 하위 버전 fallback
                 try await Task.sleep(nanoseconds: 1_000_000_000)
+                let summary = RouteStoredSummary.fallback(
+                    for: snapshot,
+                    tonePreference: selectedSummaryTone
+                )
                 withAnimation {
                     self.route.applyStoredSummary(
-                        title: "✨ [AI] \(snapshot.startName) 여정",
-                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
-                        diary: "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다.",
-                        highlights: ["경로 기록 보완", "감성 요약 생성", "이동 흐름 정리"],
-                        toneRawValue: selectedSummaryTone.rawValue,
-                        confidence: nil
+                        title: summary.title,
+                        caption: summary.caption,
+                        diary: summary.diary,
+                        highlights: summary.highlights,
+                        toneRawValue: summary.toneRawValue,
+                        confidence: summary.confidence
                     )
                     syncStoredAISummary()
                 }

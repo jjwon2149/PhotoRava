@@ -88,6 +88,99 @@ extension Route {
     }
 }
 
+struct RouteStoredSummary {
+    var title: String?
+    var caption: String?
+    var diary: String?
+    var highlights: [String]
+    var toneRawValue: String?
+    var confidence: Double?
+}
+
+extension RouteStoredSummary {
+    static func fallback(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> RouteStoredSummary {
+        let distanceText = String(format: "%.1f", snapshot.distanceKm)
+        let timeLabel = snapshot.timeOfDay ?? "주간"
+        let photoText = "\(snapshot.photoCount)장의 사진"
+        let topPlace = shortLabel(from: snapshot.visitedRoadsTopN.first ?? snapshot.areaKeywords.first ?? snapshot.startName)
+        let titleCandidate = normalizedText(snapshot.userEditedTitle ?? "").isEmpty
+            ? "\(topPlace) \(timeLabel) 기록"
+            : normalizedText(snapshot.userEditedTitle ?? "")
+        let caption = "약 \(distanceText)km를 \(snapshot.durationMin)분 동안 이동하며 \(photoText)을 남긴 여정."
+
+        let narrativeFocus = snapshot.visitedRoadsTopN.prefix(2).joined(separator: ", ")
+        let focusSentence = narrativeFocus.isEmpty
+            ? "사진의 시간 순서를 따라 이동 흐름이 자연스럽게 이어집니다."
+            : "\(narrativeFocus) 주변의 흐름이 특히 또렷하게 남았습니다."
+
+        let diary: String
+        switch tonePreference {
+        case .documentary:
+            diary = """
+            \(timeLabel)에 \(snapshot.startName)에서 출발해 \(snapshot.endName)까지 이어진 이동 기록입니다. \
+            총 \(distanceText)km를 \(snapshot.durationMin)분 동안 이동했고, \(photoText)이 경로의 주요 장면을 남겼습니다. \
+            \(focusSentence)
+            """
+        case .warm:
+            diary = """
+            \(timeLabel)에 \(snapshot.startName)에서 시작한 여정은 \(snapshot.endName)까지 차분히 이어졌습니다. \
+            총 \(distanceText)km를 \(snapshot.durationMin)분 동안 움직이며 \(photoText) 속에 그날의 분위기를 담았습니다. \
+            \(focusSentence)
+            """
+        }
+
+        let highlights = deduplicatedHighlights([
+            shortLabel(from: timeLabel),
+            shortLabel(from: topPlace),
+            shortLabel(from: "\(snapshot.durationMin)분 기록")
+        ])
+
+        return RouteStoredSummary(
+            title: clampedTitle(titleCandidate, fallback: "\(timeLabel) 경로 기록"),
+            caption: caption,
+            diary: normalizedText(diary),
+            highlights: highlights,
+            toneRawValue: tonePreference.rawValue,
+            confidence: 0.62
+        )
+    }
+
+    private static func normalizedText(_ value: String) -> String {
+        value
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func shortLabel(from value: String) -> String {
+        let cleaned = normalizedText(value)
+        return cleaned.isEmpty ? "경로 기록" : String(cleaned.prefix(20))
+    }
+
+    private static func clampedTitle(_ value: String, fallback: String) -> String {
+        let cleaned = normalizedText(value)
+        let candidate = cleaned.isEmpty ? fallback : cleaned
+        return String(candidate.prefix(24))
+    }
+
+    private static func deduplicatedHighlights(_ values: [String]) -> [String] {
+        var result: [String] = []
+        for value in values {
+            let label = shortLabel(from: value)
+            if !result.contains(label) {
+                result.append(label)
+            }
+        }
+        if result.count < 2 {
+            result.append("요약 생성 완료")
+        }
+        return Array(result.prefix(3))
+    }
+}
+
 // MARK: - AI Summary Types
 
 enum RouteSummaryTonePreference: String, CaseIterable, Identifiable {
