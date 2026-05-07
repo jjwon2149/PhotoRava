@@ -45,19 +45,25 @@ struct RouteBottomSheet: View {
                         
                         Spacer()
                         
-                        if isGeneratingAI {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else if aiCaption == nil {
-                            Button {
-                                Task { await generateAISummary() }
-                            } label: {
-                                Label("AI 요약", systemImage: "sparkles")
-                                    .font(.caption)
+                        if visibleAICaption == nil {
+                            if isGeneratingAI {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                HStack(spacing: 8) {
+                                    RouteSummaryToneMenu(selection: $selectedSummaryTone)
+
+                                    Button {
+                                        Task { await generateAISummary() }
+                                    } label: {
+                                        Label("AI 요약", systemImage: "sparkles")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.purple)
+                                    .controlSize(.small)
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .tint(.purple)
-                            .controlSize(.small)
                         }
                     }
                     
@@ -72,14 +78,6 @@ struct RouteBottomSheet: View {
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-
-                    Picker("AI 톤", selection: $selectedSummaryTone) {
-                        ForEach(RouteSummaryTonePreference.allCases) { tone in
-                            Text(tone.displayName).tag(tone)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isGeneratingAI)
                     
                     if isGeneratingAI {
                         RouteAIActivityPanel(
@@ -96,28 +94,13 @@ struct RouteBottomSheet: View {
                     }
                     
                     // AI 요약 결과 표시
-                    if let caption = aiCaption {
+                    if let caption = visibleAICaption {
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(caption)
-                                    .font(.subheadline)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if isGeneratingAI {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Button {
-                                        Task { await generateAISummary() }
-                                    } label: {
-                                        Image(systemName: "arrow.clockwise")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .tint(.purple)
-                                }
-                            }
+                            Text(caption)
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             
                             if !aiHighlights.isEmpty {
                                 HStack(spacing: 6) {
@@ -130,6 +113,31 @@ struct RouteBottomSheet: View {
                                             .foregroundStyle(.purple)
                                             .clipShape(Capsule())
                                     }
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                Spacer()
+
+                                RouteSummaryToneMenu(
+                                    selection: $selectedSummaryTone,
+                                    isDisabled: isGeneratingAI
+                                )
+
+                                if isGeneratingAI {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Button {
+                                        Task { await generateAISummary() }
+                                    } label: {
+                                        Label("다시 만들기", systemImage: "arrow.clockwise")
+                                            .font(.caption2)
+                                            .fontWeight(.medium)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.purple)
+                                    .controlSize(.mini)
                                 }
                             }
                         }
@@ -212,6 +220,15 @@ struct RouteBottomSheet: View {
         .task(id: viewModel.route.id) {
             syncStoredAISummary()
         }
+    }
+
+    private var visibleAICaption: String? {
+        guard let caption = aiCaption?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !caption.isEmpty else {
+            return nil
+        }
+
+        return caption
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {

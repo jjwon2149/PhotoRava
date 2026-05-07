@@ -31,30 +31,26 @@ struct RouteEditView: View {
                         TextField("경로 이름", text: $route.name)
                             .font(.headline)
                         
-                        if isGeneratingAI {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Button {
-                                Task { await generateAISummary() }
-                            } label: {
-                                Image(systemName: "sparkles")
-                                    .foregroundStyle(.purple)
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
+                        if visibleAICaption == nil {
+                            if isGeneratingAI {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                RouteSummaryToneMenu(selection: $selectedSummaryTone)
 
-                    Picker("AI 톤", selection: $selectedSummaryTone) {
-                        ForEach(RouteSummaryTonePreference.allCases) { tone in
-                            Text(tone.displayName).tag(tone)
+                                Button {
+                                    Task { await generateAISummary() }
+                                } label: {
+                                    Image(systemName: "sparkles")
+                                        .foregroundStyle(.purple)
+                                }
+                                .buttonStyle(.borderless)
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .disabled(isGeneratingAI)
                     
                     // AI 요약 결과 및 감성 일기 미리보기
-                    if let caption = aiCaption {
+                    if let caption = visibleAICaption {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Label("AI의 여행 기록", systemImage: "sparkles")
@@ -104,6 +100,11 @@ struct RouteEditView: View {
                             
                             HStack {
                                 Spacer()
+                                RouteSummaryToneMenu(
+                                    selection: $selectedSummaryTone,
+                                    isDisabled: isGeneratingAI
+                                )
+
                                 Button {
                                     Task { await generateAISummary() }
                                 } label: {
@@ -119,7 +120,7 @@ struct RouteEditView: View {
                         .padding(.vertical, 8)
                     }
                 } footer: {
-                    if aiCaption == nil {
+                    if visibleAICaption == nil {
                         Text("✨ 마법봉을 눌러 AI가 제안하는 매력적인 제목과 일기를 만들어보세요.")
                     }
                 }
@@ -201,6 +202,15 @@ struct RouteEditView: View {
             }
         }
     }
+
+    private var visibleAICaption: String? {
+        guard let caption = aiCaption?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !caption.isEmpty else {
+            return nil
+        }
+
+        return caption
+    }
     
     private func deleteRecords(at offsets: IndexSet) {
         route.photoRecords.remove(atOffsets: offsets)
@@ -274,5 +284,30 @@ struct RouteEditView: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+}
+
+struct RouteSummaryToneMenu: View {
+    @Binding var selection: RouteSummaryTonePreference
+    var isDisabled = false
+
+    var body: some View {
+        Menu {
+            Picker("AI 톤", selection: $selection) {
+                ForEach(RouteSummaryTonePreference.allCases) { tone in
+                    Text(tone.displayName).tag(tone)
+                }
+            }
+        } label: {
+            Label(selection.displayName, systemImage: "text.bubble")
+                .font(.caption2)
+                .fontWeight(.medium)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        .tint(.purple)
+        .disabled(isDisabled)
+        .accessibilityLabel("AI 톤")
+        .accessibilityValue(selection.displayName)
     }
 }
