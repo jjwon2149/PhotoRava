@@ -90,6 +90,31 @@ extension Route {
 
 // MARK: - AI Summary Types
 
+enum RouteSummaryTonePreference: String, CaseIterable, Identifiable {
+    case warm
+    case documentary
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .warm:
+            return "따뜻한 감성"
+        case .documentary:
+            return "다큐멘터리"
+        }
+    }
+
+    var promptGuide: String {
+        switch self {
+        case .warm:
+            return "따뜻한 감성: 개인적인 여운, 부드러운 감정, 여행 일기처럼 자연스러운 표현을 사용하세요."
+        case .documentary:
+            return "다큐멘터리 스타일: 관찰자 시선, 사실 기반 묘사, 차분하고 기록적인 표현을 사용하세요."
+        }
+    }
+}
+
 @available(iOS 26.0, *)
 @Generable
 enum RouteTone: String {

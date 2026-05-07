@@ -157,16 +157,6 @@ enum OCRError: Error {
     }
 }
 
-enum LocalAIAvailabilityIssue: Equatable {
-    case requiresIOS26
-    case deviceNotEligible
-    case appleIntelligenceNotEnabled
-    case modelNotReady
-    case unsupportedLocale
-    case invalidOutput
-    case unavailable
-}
-
 // MARK: - AI Service Implementation
 
 @available(iOS 26.0, *)
@@ -213,8 +203,6 @@ final class LocalAIService {
                         return "Apple Intelligence가 활성화되어 있지 않습니다."
                     case .modelNotReady:
                         return "온디바이스 모델 준비가 완료되지 않았습니다."
-                    @unknown default:
-                        return "AI 기능을 사용할 수 없습니다."
                     }
                 }
             case .unsupportedLocale:
@@ -222,36 +210,10 @@ final class LocalAIService {
             case .invalidOutput: return "AI 응답 형식이 올바르지 않습니다."
             }
         }
-
-        var availabilityIssue: LocalAIAvailabilityIssue {
-            switch self {
-            case .notAvailable(let availability):
-                return LocalAIService.availabilityIssue(for: availability) ?? .unavailable
-            case .unsupportedLocale:
-                return .unsupportedLocale
-            case .invalidOutput:
-                return .invalidOutput
-            }
-        }
     }
 
     func isServiceAvailable() async -> Bool {
-        availabilityIssue(for: geocodeModel) == nil || availabilityIssue(for: routeSummaryModel) == nil
-    }
-
-    func serviceAvailabilityIssue() -> LocalAIAvailabilityIssue? {
-        if availabilityIssue(for: geocodeModel) == nil || availabilityIssue(for: routeSummaryModel) == nil {
-            return nil
-        }
-        return routeSummaryAvailabilityIssue() ?? geocodeAvailabilityIssue()
-    }
-
-    func routeSummaryAvailabilityIssue() -> LocalAIAvailabilityIssue? {
-        availabilityIssue(for: routeSummaryModel)
-    }
-
-    func geocodeAvailabilityIssue() -> LocalAIAvailabilityIssue? {
-        availabilityIssue(for: geocodeModel)
+        isModelReady(geocodeModel) || isModelReady(routeSummaryModel)
     }
 
     func prewarmIfNeeded() {
@@ -314,8 +276,11 @@ final class LocalAIService {
     }
 
     /// 경로 통계 데이터를 기반으로 매력적인 경로 요약을 생성
-    func routeNarrator(snapshot: RouteStatsSnapshot) async throws -> RouteSummary {
-        let fallback = fallbackRouteSummary(for: snapshot)
+    func routeNarrator(
+        snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference = .warm
+    ) async throws -> RouteSummary {
+        let fallback = fallbackRouteSummary(for: snapshot, tonePreference: tonePreference)
 
         do {
             guard isModelReady(routeSummaryModel) else {
@@ -326,18 +291,23 @@ final class LocalAIService {
             }
 
             let response = try await routeSummarySession.respond(
-                to: routeSummaryPrompt(for: snapshot),
+                to: routeSummaryPrompt(for: snapshot, tonePreference: tonePreference),
                 generating: RouteSummary.self,
                 includeSchemaInPrompt: false,
                 options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 420)
             )
 
             var summary = response.content
-            validateAndCleanSummary(&summary, fallback: fallback, snapshot: snapshot)
+            validateAndCleanSummary(
+                &summary,
+                fallback: fallback,
+                snapshot: snapshot,
+                tonePreference: tonePreference
+            )
 
             AILogger.shared.log(
                 type: .routeNarrator,
-                input: routeSummaryLogInput(for: snapshot),
+                input: routeSummaryLogInput(for: snapshot, tonePreference: tonePreference),
                 output: summary.title,
                 confidence: summary.confidence,
                 isSuccess: true
@@ -345,10 +315,15 @@ final class LocalAIService {
             return summary
         } catch {
             var summary = fallback
-            validateAndCleanSummary(&summary, fallback: fallback, snapshot: snapshot)
+            validateAndCleanSummary(
+                &summary,
+                fallback: fallback,
+                snapshot: snapshot,
+                tonePreference: tonePreference
+            )
             AILogger.shared.log(
                 type: .routeNarrator,
-                input: routeSummaryLogInput(for: snapshot),
+                input: routeSummaryLogInput(for: snapshot, tonePreference: tonePreference),
                 output: summary.title,
                 confidence: summary.confidence,
                 isSuccess: false,
@@ -360,30 +335,6 @@ final class LocalAIService {
 
     private func isModelReady(_ model: SystemLanguageModel) -> Bool {
         model.availability == .available
-    }
-
-    private func availabilityIssue(for model: SystemLanguageModel) -> LocalAIAvailabilityIssue? {
-        Self.availabilityIssue(for: model.availability) ?? (supportsPreferredLocale(model) ? nil : .unsupportedLocale)
-    }
-
-    private static func availabilityIssue(for availability: SystemLanguageModel.Availability) -> LocalAIAvailabilityIssue? {
-        switch availability {
-        case .available:
-            return nil
-        case .unavailable(let reason):
-            switch reason {
-            case .deviceNotEligible:
-                return .deviceNotEligible
-            case .appleIntelligenceNotEnabled:
-                return .appleIntelligenceNotEnabled
-            case .modelNotReady:
-                return .modelNotReady
-            @unknown default:
-                return .unavailable
-            }
-        @unknown default:
-            return .unavailable
-        }
     }
 
     private func supportsPreferredLocale(_ model: SystemLanguageModel) -> Bool {
@@ -583,10 +534,12 @@ final class LocalAIService {
         )
     }
 
-    private func routeSummaryPrompt(for snapshot: RouteStatsSnapshot) -> String {
+    private func routeSummaryPrompt(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> String {
         let roads = snapshot.visitedRoadsTopN.isEmpty ? "없음" : snapshot.visitedRoadsTopN.joined(separator: ", ")
         let areas = snapshot.areaKeywords.isEmpty ? "없음" : snapshot.areaKeywords.prefix(5).joined(separator: ", ")
-        let editedHighlights = snapshot.userEditedHighlights.isEmpty ? "없음" : snapshot.userEditedHighlights.joined(separator: ", ")
 
         return """
         다음 경로 통계를 바탕으로 한국어 RouteSummary를 생성하세요.
@@ -595,7 +548,9 @@ final class LocalAIService {
         - caption에는 총 거리(km)와 소요 시간(분)을 반드시 포함
         - diaryEntry는 3~5문장
         - highlights는 2~3개, 각 20자 이내
-        - userEditedTitle, userEditedCaption, userEditedDiaryEntry, userEditedHighlights가 있으면 완전히 무시하지 말고 참고하세요.
+        - tone은 반드시 \(tonePreference.rawValue)
+        - \(tonePreference.promptGuide)
+        - userEditedTitle이 있으면 완전히 무시하지 말고 참고하세요.
 
         dateRange: \(snapshot.dateRange)
         distanceKm: \(String(format: "%.1f", snapshot.distanceKm))
@@ -607,24 +562,28 @@ final class LocalAIService {
         visitedRoadsTopN: \(roads)
         areaKeywords: \(areas)
         userEditedTitle: \(snapshot.userEditedTitle ?? "없음")
-        userEditedCaption: \(snapshot.userEditedCaption ?? "없음")
-        userEditedDiaryEntry: \(snapshot.userEditedDiaryEntry ?? "없음")
-        userEditedHighlights: \(editedHighlights)
         """
     }
 
-    private func routeSummaryLogInput(for snapshot: RouteStatsSnapshot) -> String {
+    private func routeSummaryLogInput(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> String {
         [
             snapshot.dateRange,
             snapshot.startName,
             snapshot.endName,
             String(format: "%.1fkm", snapshot.distanceKm),
             "\(snapshot.durationMin)분",
-            "\(snapshot.photoCount)장"
+            "\(snapshot.photoCount)장",
+            "tone=\(tonePreference.rawValue)"
         ].joined(separator: " | ")
     }
 
-    private func fallbackRouteSummary(for snapshot: RouteStatsSnapshot) -> RouteSummary {
+    private func fallbackRouteSummary(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> RouteSummary {
         let distanceText = String(format: "%.1f", snapshot.distanceKm)
         let photoText = "\(snapshot.photoCount)장의 사진"
         let topRoad = shortLabel(from: snapshot.visitedRoadsTopN.first ?? snapshot.areaKeywords.first ?? snapshot.startName)
@@ -633,10 +592,7 @@ final class LocalAIService {
             ? "\(topRoad) \(snapshot.timeOfDay ?? "주간") 기록"
             : editedTitle
         let title = clampedTitle(titleCandidate, fallback: "\(snapshot.timeOfDay ?? "주간") 경로 기록")
-        let editedCaption = normalizedText(snapshot.userEditedCaption ?? "")
-        let caption = editedCaption.isEmpty
-            ? "약 \(distanceText)km를 \(snapshot.durationMin)분 동안 이동하며 \(photoText)을 남긴 여정."
-            : editedCaption
+        let caption = "약 \(distanceText)km를 \(snapshot.durationMin)분 동안 이동하며 \(photoText)을 남긴 여정."
 
         let narrativeFocus = snapshot.visitedRoadsTopN.prefix(2).joined(separator: ", ")
         let diaryThirdSentence: String
@@ -651,27 +607,21 @@ final class LocalAIService {
         총 \(distanceText)km를 \(snapshot.durationMin)분 동안 움직이며 \(photoText)으로 장면을 기록했습니다. \
         \(diaryThirdSentence)
         """
-        let editedDiary = normalizedText(snapshot.userEditedDiaryEntry ?? "")
 
-        let generatedHighlights = Array(
+        let highlights = Array(
             NSOrderedSet(array: [
                 shortLabel(from: snapshot.timeOfDay ?? "주간 이동"),
                 shortLabel(from: topRoad),
                 shortLabel(from: "\(snapshot.durationMin)분 기록")
             ])
         ) as? [String] ?? []
-        let editedHighlights = snapshot.userEditedHighlights
-            .map(normalizedText)
-            .filter { !$0.isEmpty }
-            .map { String($0.prefix(20)) }
-        let highlights = editedHighlights.isEmpty ? generatedHighlights : editedHighlights
 
         return RouteSummary(
             title: title,
             caption: caption,
-            diaryEntry: editedDiary.isEmpty ? normalizedText(diary) : editedDiary,
+            diaryEntry: normalizedText(diary),
             highlights: Array(highlights.prefix(3)).map { String($0.prefix(20)) },
-            tone: editedTitle.isEmpty ? .warm : .documentary,
+            tone: RouteTone(rawValue: tonePreference.rawValue) ?? .warm,
             confidence: 0.62
         )
     }
@@ -679,7 +629,8 @@ final class LocalAIService {
     private func validateAndCleanSummary(
         _ summary: inout RouteSummary,
         fallback: RouteSummary,
-        snapshot: RouteStatsSnapshot
+        snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
     ) {
         summary.title = clampedTitle(summary.title, fallback: fallback.title)
 
@@ -709,6 +660,8 @@ final class LocalAIService {
         if summary.confidence == 0 {
             summary.confidence = fallback.confidence
         }
+
+        summary.tone = RouteTone(rawValue: tonePreference.rawValue) ?? fallback.tone
     }
 
     private func deduplicatedQueries(_ values: [String]) -> [String] {

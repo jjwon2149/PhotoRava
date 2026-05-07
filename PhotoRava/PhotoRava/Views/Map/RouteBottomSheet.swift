@@ -21,6 +21,7 @@ struct RouteBottomSheet: View {
     @State private var isAICompletionVisible = false
     @State private var aiCaption: String?
     @State private var aiHighlights: [String] = []
+    @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
     
     var body: some View {
         ScrollView {
@@ -71,6 +72,14 @@ struct RouteBottomSheet: View {
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                    Picker("AI 톤", selection: $selectedSummaryTone) {
+                        ForEach(RouteSummaryTonePreference.allCases) { tone in
+                            Text(tone.displayName).tag(tone)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isGeneratingAI)
                     
                     if isGeneratingAI {
                         RouteAIActivityPanel(
@@ -89,10 +98,26 @@ struct RouteBottomSheet: View {
                     // AI 요약 결과 표시
                     if let caption = aiCaption {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(caption)
-                                .font(.subheadline)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.primary)
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(caption)
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if isGeneratingAI {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Button {
+                                        Task { await generateAISummary() }
+                                    } label: {
+                                        Image(systemName: "arrow.clockwise")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .tint(.purple)
+                                }
+                            }
                             
                             if !aiHighlights.isEmpty {
                                 HStack(spacing: 6) {
@@ -311,7 +336,10 @@ struct RouteBottomSheet: View {
             }
             
             if #available(iOS 26.0, *) {
-                let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
+                let summary = try await LocalAIService.shared.routeNarrator(
+                    snapshot: snapshot,
+                    tonePreference: selectedSummaryTone
+                )
                 withAnimation {
                     aiGenerationStatus = "요약과 하이라이트를 반영하는 중..."
                     viewModel.route.apply(summary: summary)
@@ -327,7 +355,7 @@ struct RouteBottomSheet: View {
                         caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
                         diary: viewModel.route.aiSummaryDiary,
                         highlights: ["경로 기록 보완", "요약 생성 완료"],
-                        toneRawValue: nil,
+                        toneRawValue: selectedSummaryTone.rawValue,
                         confidence: nil
                     )
                     syncStoredAISummary()
@@ -355,6 +383,9 @@ struct RouteBottomSheet: View {
     private func syncStoredAISummary() {
         aiCaption = viewModel.route.aiSummaryCaption
         aiHighlights = viewModel.route.aiSummaryHighlights
+        if let storedTone = RouteSummaryTonePreference(rawValue: viewModel.route.aiSummaryToneRawValue ?? "") {
+            selectedSummaryTone = storedTone
+        }
     }
 
     private func routeShareSummaryText() -> String {
