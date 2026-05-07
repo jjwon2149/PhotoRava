@@ -1611,6 +1611,7 @@ final class ExifStampViewModel: ObservableObject {
     private let batchExportQueue = DispatchQueue(label: "PhotoRava.ExifStampBatchExportQueue", qos: .userInitiated, attributes: .concurrent)
     @Published private(set) var batchSources: [BatchSource] = []
     @Published private(set) var thumbnailCache: [String: UIImage] = [:]
+    private var metadataCache: [String: ExifStampMetadata] = [:]
     private var lastBatchSources: [BatchSource] = []
     private var lastBatchSnapshot: BatchSnapshot?
     private var lastBatchMode: ExifStampBatchExportState.Mode?
@@ -1703,11 +1704,7 @@ final class ExifStampViewModel: ObservableObject {
 
         originalImage = image
         originalImageData = data
-        if let data {
-            metadata = ExifStampMetadataService.shared.extract(from: data, fallbackAsset: asset)
-        } else {
-            metadata = ExifStampMetadata(capturedAt: asset?.creationDate)
-        }
+        metadata = await metadataFor(data: data, asset: asset, identifier: id)
         // 메인 스레드에서 즉시 렌더링 호출
         await MainActor.run {
             self.scheduleRender()
@@ -2001,17 +1998,40 @@ final class ExifStampViewModel: ObservableObject {
             }
             
             originalImageData = data
-            
-            if let data {
-                metadata = ExifStampMetadataService.shared.extract(from: data, fallbackAsset: asset)
-            } else {
-                metadata = ExifStampMetadata(capturedAt: asset?.creationDate)
-            }
+            metadata = await metadataFor(data: data, asset: asset, identifier: identifier)
             
             scheduleRender()
         } catch {
             showError(error.localizedDescription)
         }
+    }
+
+    private func metadataFor(data: Data?, asset: PHAsset?, identifier: String?) async -> ExifStampMetadata {
+        guard let data else {
+            return ExifStampMetadata(capturedAt: asset?.creationDate)
+        }
+
+        let cacheKey = metadataCacheKey(identifier: identifier, data: data, asset: asset)
+        if let cacheKey, let cached = metadataCache[cacheKey] {
+            return cached
+        }
+
+        let fallbackCapturedAt = asset?.creationDate
+        let parsed = await Task.detached(priority: .userInitiated) {
+            ExifStampMetadataService.shared.extract(from: data, fallbackCapturedAt: fallbackCapturedAt)
+        }.value
+
+        if let cacheKey {
+            metadataCache[cacheKey] = parsed
+        }
+        return parsed
+    }
+
+    private func metadataCacheKey(identifier: String?, data: Data, asset: PHAsset?) -> String? {
+        guard let identifier else { return nil }
+        let assetVersion = asset?.modificationDate ?? asset?.creationDate
+        let version = assetVersion?.timeIntervalSinceReferenceDate ?? 0
+        return "\(identifier)|\(data.count)|\(version)"
     }
 
     func scheduleRender() {
@@ -2455,14 +2475,15 @@ final class ExifStampViewModel: ObservableObject {
         snapshot: BatchSnapshot,
         identifier: String
     ) async -> ExportedData? {
-        await withCheckedContinuation { continuation in
+        let fallbackCapturedAt = asset?.creationDate
+        return await withCheckedContinuation { continuation in
             batchExportQueue.async {
                 let exported: ExportedData? = autoreleasepool {
                     let metadata: ExifStampMetadata = {
                         if let originalData {
-                            return ExifStampMetadataService.shared.extract(from: originalData, fallbackAsset: asset)
+                            return ExifStampMetadataService.shared.extract(from: originalData, fallbackCapturedAt: fallbackCapturedAt)
                         }
-                        return ExifStampMetadata(capturedAt: asset?.creationDate)
+                        return ExifStampMetadata(capturedAt: fallbackCapturedAt)
                     }()
 
                     let lines = ExifStampMetadataService.formatCaptionLines(
