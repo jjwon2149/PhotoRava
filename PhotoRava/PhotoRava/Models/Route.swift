@@ -24,6 +24,10 @@ class Route {
     var aiSummaryToneRawValue: String?
     var aiSummaryConfidence: Double?
     var aiSummaryGeneratedAt: Date?
+    var userEditedTitle: String?
+    var userEditedCaption: String?
+    var userEditedDiaryEntry: String?
+    var userEditedHighlights: [String] = []
     
     // 지도용 좌표들 (JSON으로 저장)
     var coordinatesData: Data?
@@ -53,6 +57,7 @@ extension Route {
         aiSummaryToneRawValue = summary.tone.rawValue
         aiSummaryConfidence = summary.confidence
         aiSummaryGeneratedAt = Date()
+        clearUserEditedSummary()
     }
 
     func applyStoredSummary(
@@ -72,6 +77,14 @@ extension Route {
         aiSummaryToneRawValue = toneRawValue
         aiSummaryConfidence = confidence
         aiSummaryGeneratedAt = Date()
+        clearUserEditedSummary()
+    }
+
+    func clearUserEditedSummary() {
+        userEditedTitle = nil
+        userEditedCaption = nil
+        userEditedDiaryEntry = nil
+        userEditedHighlights = []
     }
 }
 
@@ -118,4 +131,7 @@ struct RouteStatsSnapshot: Codable {
     var timeOfDay: String?          // "오전" / "오후" / "저녁" / "야간"
     var areaKeywords: [String]      // 지역 키워드 (구/동 수준)
     var userEditedTitle: String?    // 사용자가 이전에 편집한 제목 (재생성 시 참고)
+    var userEditedCaption: String?  // 사용자가 이전에 편집한 캡션 (재생성 시 참고)
+    var userEditedDiaryEntry: String? // 사용자가 이전에 편집한 일기 (재생성 시 참고)
+    var userEditedHighlights: [String] // 사용자가 이전에 편집한 하이라이트 (재생성 시 참고)
 }

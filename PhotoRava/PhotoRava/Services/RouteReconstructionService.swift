@@ -401,7 +401,10 @@ class RouteReconstructionService {
             visitedRoadsTopN: Array(currentRoadNames.prefix(5)),
             timeOfDay: timeOfDay,
             areaKeywords: currentRoadNames,
-            userEditedTitle: route.name
+            userEditedTitle: route.userEditedTitle,
+            userEditedCaption: route.userEditedCaption,
+            userEditedDiaryEntry: route.userEditedDiaryEntry,
+            userEditedHighlights: route.userEditedHighlights
         )
     }
 
