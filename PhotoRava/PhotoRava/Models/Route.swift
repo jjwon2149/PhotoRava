@@ -24,6 +24,10 @@ class Route {
     var aiSummaryToneRawValue: String?
     var aiSummaryConfidence: Double?
     var aiSummaryGeneratedAt: Date?
+    var userEditedTitle: String?
+    var userEditedCaption: String?
+    var userEditedDiaryEntry: String?
+    var userEditedHighlights: [String] = []
     
     // 지도용 좌표들 (JSON으로 저장)
     var coordinatesData: Data?
@@ -53,6 +57,7 @@ extension Route {
         aiSummaryToneRawValue = summary.tone.rawValue
         aiSummaryConfidence = summary.confidence
         aiSummaryGeneratedAt = Date()
+        clearUserEditedSummary()
     }
 
     func applyStoredSummary(
@@ -72,10 +77,43 @@ extension Route {
         aiSummaryToneRawValue = toneRawValue
         aiSummaryConfidence = confidence
         aiSummaryGeneratedAt = Date()
+        clearUserEditedSummary()
+    }
+
+    func clearUserEditedSummary() {
+        userEditedTitle = nil
+        userEditedCaption = nil
+        userEditedDiaryEntry = nil
+        userEditedHighlights = []
     }
 }
 
 // MARK: - AI Summary Types
+
+enum RouteSummaryTonePreference: String, CaseIterable, Identifiable {
+    case warm
+    case documentary
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .warm:
+            return "따뜻한 감성"
+        case .documentary:
+            return "다큐멘터리"
+        }
+    }
+
+    var promptGuide: String {
+        switch self {
+        case .warm:
+            return "따뜻한 감성: 개인적인 여운, 부드러운 감정, 여행 일기처럼 자연스러운 표현을 사용하세요."
+        case .documentary:
+            return "다큐멘터리 스타일: 관찰자 시선, 사실 기반 묘사, 차분하고 기록적인 표현을 사용하세요."
+        }
+    }
+}
 
 @available(iOS 26.0, *)
 @Generable
@@ -118,4 +156,7 @@ struct RouteStatsSnapshot: Codable {
     var timeOfDay: String?          // "오전" / "오후" / "저녁" / "야간"
     var areaKeywords: [String]      // 지역 키워드 (구/동 수준)
     var userEditedTitle: String?    // 사용자가 이전에 편집한 제목 (재생성 시 참고)
+    var userEditedCaption: String?  // 사용자가 이전에 편집한 캡션 (재생성 시 참고)
+    var userEditedDiaryEntry: String? // 사용자가 이전에 편집한 일기 (재생성 시 참고)
+    var userEditedHighlights: [String] // 사용자가 이전에 편집한 하이라이트 (재생성 시 참고)
 }

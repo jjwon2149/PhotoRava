@@ -21,6 +21,7 @@ struct RouteEditView: View {
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
+    @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
     
     var body: some View {
         NavigationStack {
@@ -43,6 +44,14 @@ struct RouteEditView: View {
                             .buttonStyle(.borderless)
                         }
                     }
+
+                    Picker("AI 톤", selection: $selectedSummaryTone) {
+                        ForEach(RouteSummaryTonePreference.allCases) { tone in
+                            Text(tone.displayName).tag(tone)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isGeneratingAI)
                     
                     // AI 요약 결과 및 감성 일기 미리보기
                     if let caption = aiCaption {
@@ -210,7 +219,10 @@ struct RouteEditView: View {
         
         do {
             if #available(iOS 26.0, *) {
-                let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
+                let summary = try await LocalAIService.shared.routeNarrator(
+                    snapshot: snapshot,
+                    tonePreference: selectedSummaryTone
+                )
                 withAnimation {
                     self.route.apply(summary: summary)
                     syncStoredAISummary()
@@ -224,7 +236,7 @@ struct RouteEditView: View {
                         caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
                         diary: "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다.",
                         highlights: ["경로 기록 보완", "감성 요약 생성", "이동 흐름 정리"],
-                        toneRawValue: nil,
+                        toneRawValue: selectedSummaryTone.rawValue,
                         confidence: nil
                     )
                     syncStoredAISummary()
@@ -259,5 +271,8 @@ struct RouteEditView: View {
         aiCaption = route.aiSummaryCaption
         aiDiary = route.aiSummaryDiary
         aiHighlights = route.aiSummaryHighlights
+        if let storedTone = RouteSummaryTonePreference(rawValue: route.aiSummaryToneRawValue ?? "") {
+            selectedSummaryTone = storedTone
+        }
     }
 }
