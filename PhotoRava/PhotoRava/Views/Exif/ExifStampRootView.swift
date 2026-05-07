@@ -2440,32 +2440,28 @@ final class ExifStampViewModel: ObservableObject {
     }
 
     private func recordBatchFailure(index: Int, identifier: String, message: String) {
-        Task { @MainActor in
-            var newState = self.batchExportState
-            newState.failed += 1
-            if index >= 0, index < newState.results.count {
-                newState.results[index].status = .failed
-                newState.results[index].message = message
-                newState.results[index].outputURL = nil
-            }
-            if newState.lastFailures.count < 10 {
-                newState.lastFailures.append("\(identifier): \(message)")
-            }
-            self.batchExportState = newState
+        var newState = batchExportState
+        newState.failed += 1
+        if index >= 0, index < newState.results.count {
+            newState.results[index].status = .failed
+            newState.results[index].message = message
+            newState.results[index].outputURL = nil
         }
+        if newState.lastFailures.count < 10 {
+            newState.lastFailures.append("\(identifier): \(message)")
+        }
+        batchExportState = newState
     }
 
     private func recordBatchSuccess(index: Int, outputURL: URL?) {
-        Task { @MainActor in
-            var newState = self.batchExportState
-            newState.completed += 1
-            if index >= 0, index < newState.results.count {
-                newState.results[index].status = .success
-                newState.results[index].message = nil
-                newState.results[index].outputURL = outputURL
-            }
-            self.batchExportState = newState
+        var newState = batchExportState
+        newState.completed += 1
+        if index >= 0, index < newState.results.count {
+            newState.results[index].status = .success
+            newState.results[index].message = nil
+            newState.results[index].outputURL = outputURL
         }
+        batchExportState = newState
     }
 
     private func renderAndExportOne(
