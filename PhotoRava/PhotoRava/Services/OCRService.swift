@@ -157,6 +157,16 @@ enum OCRError: Error {
     }
 }
 
+enum LocalAIAvailabilityIssue: Equatable {
+    case requiresIOS26
+    case deviceNotEligible
+    case appleIntelligenceNotEnabled
+    case modelNotReady
+    case unsupportedLocale
+    case invalidOutput
+    case unavailable
+}
+
 // MARK: - AI Service Implementation
 
 @available(iOS 26.0, *)
@@ -203,6 +213,8 @@ final class LocalAIService {
                         return "Apple Intelligence가 활성화되어 있지 않습니다."
                     case .modelNotReady:
                         return "온디바이스 모델 준비가 완료되지 않았습니다."
+                    @unknown default:
+                        return "AI 기능을 사용할 수 없습니다."
                     }
                 }
             case .unsupportedLocale:
@@ -210,10 +222,25 @@ final class LocalAIService {
             case .invalidOutput: return "AI 응답 형식이 올바르지 않습니다."
             }
         }
+
+        var availabilityIssue: LocalAIAvailabilityIssue {
+            switch self {
+            case .notAvailable(let availability):
+                return LocalAIService.availabilityIssue(for: availability) ?? .unavailable
+            case .unsupportedLocale:
+                return .unsupportedLocale
+            case .invalidOutput:
+                return .invalidOutput
+            }
+        }
     }
 
     func isServiceAvailable() async -> Bool {
-        isModelReady(geocodeModel) || isModelReady(routeSummaryModel)
+        availabilityIssue(for: geocodeModel) == nil || availabilityIssue(for: routeSummaryModel) == nil
+    }
+
+    func routeSummaryAvailabilityIssue() -> LocalAIAvailabilityIssue? {
+        availabilityIssue(for: routeSummaryModel)
     }
 
     func prewarmIfNeeded() {
@@ -335,6 +362,30 @@ final class LocalAIService {
 
     private func isModelReady(_ model: SystemLanguageModel) -> Bool {
         model.availability == .available
+    }
+
+    private func availabilityIssue(for model: SystemLanguageModel) -> LocalAIAvailabilityIssue? {
+        Self.availabilityIssue(for: model.availability) ?? (supportsPreferredLocale(model) ? nil : .unsupportedLocale)
+    }
+
+    private static func availabilityIssue(for availability: SystemLanguageModel.Availability) -> LocalAIAvailabilityIssue? {
+        switch availability {
+        case .available:
+            return nil
+        case .unavailable(let reason):
+            switch reason {
+            case .deviceNotEligible:
+                return .deviceNotEligible
+            case .appleIntelligenceNotEnabled:
+                return .appleIntelligenceNotEnabled
+            case .modelNotReady:
+                return .modelNotReady
+            @unknown default:
+                return .unavailable
+            }
+        @unknown default:
+            return .unavailable
+        }
     }
 
     private func supportsPreferredLocale(_ model: SystemLanguageModel) -> Bool {
