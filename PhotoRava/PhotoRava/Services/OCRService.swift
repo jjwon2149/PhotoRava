@@ -276,8 +276,11 @@ final class LocalAIService {
     }
 
     /// 경로 통계 데이터를 기반으로 매력적인 경로 요약을 생성
-    func routeNarrator(snapshot: RouteStatsSnapshot) async throws -> RouteSummary {
-        let fallback = fallbackRouteSummary(for: snapshot)
+    func routeNarrator(
+        snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference = .warm
+    ) async throws -> RouteSummary {
+        let fallback = fallbackRouteSummary(for: snapshot, tonePreference: tonePreference)
 
         do {
             guard isModelReady(routeSummaryModel) else {
@@ -288,18 +291,23 @@ final class LocalAIService {
             }
 
             let response = try await routeSummarySession.respond(
-                to: routeSummaryPrompt(for: snapshot),
+                to: routeSummaryPrompt(for: snapshot, tonePreference: tonePreference),
                 generating: RouteSummary.self,
                 includeSchemaInPrompt: false,
                 options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 420)
             )
 
             var summary = response.content
-            validateAndCleanSummary(&summary, fallback: fallback, snapshot: snapshot)
+            validateAndCleanSummary(
+                &summary,
+                fallback: fallback,
+                snapshot: snapshot,
+                tonePreference: tonePreference
+            )
 
             AILogger.shared.log(
                 type: .routeNarrator,
-                input: routeSummaryLogInput(for: snapshot),
+                input: routeSummaryLogInput(for: snapshot, tonePreference: tonePreference),
                 output: summary.title,
                 confidence: summary.confidence,
                 isSuccess: true
@@ -307,10 +315,15 @@ final class LocalAIService {
             return summary
         } catch {
             var summary = fallback
-            validateAndCleanSummary(&summary, fallback: fallback, snapshot: snapshot)
+            validateAndCleanSummary(
+                &summary,
+                fallback: fallback,
+                snapshot: snapshot,
+                tonePreference: tonePreference
+            )
             AILogger.shared.log(
                 type: .routeNarrator,
-                input: routeSummaryLogInput(for: snapshot),
+                input: routeSummaryLogInput(for: snapshot, tonePreference: tonePreference),
                 output: summary.title,
                 confidence: summary.confidence,
                 isSuccess: false,
@@ -521,7 +534,10 @@ final class LocalAIService {
         )
     }
 
-    private func routeSummaryPrompt(for snapshot: RouteStatsSnapshot) -> String {
+    private func routeSummaryPrompt(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> String {
         let roads = snapshot.visitedRoadsTopN.isEmpty ? "없음" : snapshot.visitedRoadsTopN.joined(separator: ", ")
         let areas = snapshot.areaKeywords.isEmpty ? "없음" : snapshot.areaKeywords.prefix(5).joined(separator: ", ")
 
@@ -532,6 +548,8 @@ final class LocalAIService {
         - caption에는 총 거리(km)와 소요 시간(분)을 반드시 포함
         - diaryEntry는 3~5문장
         - highlights는 2~3개, 각 20자 이내
+        - tone은 반드시 \(tonePreference.rawValue)
+        - \(tonePreference.promptGuide)
         - userEditedTitle이 있으면 완전히 무시하지 말고 참고하세요.
 
         dateRange: \(snapshot.dateRange)
@@ -547,18 +565,25 @@ final class LocalAIService {
         """
     }
 
-    private func routeSummaryLogInput(for snapshot: RouteStatsSnapshot) -> String {
+    private func routeSummaryLogInput(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> String {
         [
             snapshot.dateRange,
             snapshot.startName,
             snapshot.endName,
             String(format: "%.1fkm", snapshot.distanceKm),
             "\(snapshot.durationMin)분",
-            "\(snapshot.photoCount)장"
+            "\(snapshot.photoCount)장",
+            "tone=\(tonePreference.rawValue)"
         ].joined(separator: " | ")
     }
 
-    private func fallbackRouteSummary(for snapshot: RouteStatsSnapshot) -> RouteSummary {
+    private func fallbackRouteSummary(
+        for snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
+    ) -> RouteSummary {
         let distanceText = String(format: "%.1f", snapshot.distanceKm)
         let photoText = "\(snapshot.photoCount)장의 사진"
         let topRoad = shortLabel(from: snapshot.visitedRoadsTopN.first ?? snapshot.areaKeywords.first ?? snapshot.startName)
@@ -596,7 +621,7 @@ final class LocalAIService {
             caption: caption,
             diaryEntry: normalizedText(diary),
             highlights: Array(highlights.prefix(3)).map { String($0.prefix(20)) },
-            tone: editedTitle.isEmpty ? .warm : .documentary,
+            tone: RouteTone(rawValue: tonePreference.rawValue) ?? .warm,
             confidence: 0.62
         )
     }
@@ -604,7 +629,8 @@ final class LocalAIService {
     private func validateAndCleanSummary(
         _ summary: inout RouteSummary,
         fallback: RouteSummary,
-        snapshot: RouteStatsSnapshot
+        snapshot: RouteStatsSnapshot,
+        tonePreference: RouteSummaryTonePreference
     ) {
         summary.title = clampedTitle(summary.title, fallback: fallback.title)
 
@@ -634,6 +660,8 @@ final class LocalAIService {
         if summary.confidence == 0 {
             summary.confidence = fallback.confidence
         }
+
+        summary.tone = RouteTone(rawValue: tonePreference.rawValue) ?? fallback.tone
     }
 
     private func deduplicatedQueries(_ values: [String]) -> [String] {

@@ -358,7 +358,7 @@ class AnalysisViewModel: ObservableObject {
                     caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "주간")의 기록",
                     diary: nil,
                     highlights: [snapshot.timeOfDay ?? "주간", "\(snapshot.durationMin)분 기록"],
-                    toneRawValue: nil,
+                    toneRawValue: RouteSummaryTonePreference.warm.rawValue,
                     confidence: nil
                 )
             }
