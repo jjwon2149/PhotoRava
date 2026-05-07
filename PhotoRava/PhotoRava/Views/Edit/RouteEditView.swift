@@ -7,13 +7,16 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct RouteEditView: View {
     @Bindable var route: Route
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @State private var editMode: EditMode = .inactive
     @State private var showingDeleteAlert = false
+    @State private var showingSettingsOpenError = false
     @State private var isRecalculating = false
     
     // AI 관련 상태
@@ -21,6 +24,7 @@ struct RouteEditView: View {
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
+    @State private var aiAvailabilityIssue: LocalAIAvailabilityIssue?
     
     var body: some View {
         NavigationStack {
@@ -41,6 +45,13 @@ struct RouteEditView: View {
                                     .foregroundStyle(.purple)
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(aiAvailabilityIssue == nil ? "AI 요약 생성" : "기본 요약 생성")
+                        }
+                    }
+
+                    if let aiAvailabilityIssue {
+                        LocalAIAvailabilityBanner(issue: aiAvailabilityIssue) {
+                            openAppleIntelligenceSettings()
                         }
                     }
                     
@@ -48,10 +59,13 @@ struct RouteEditView: View {
                     if let caption = aiCaption {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Label("AI의 여행 기록", systemImage: "sparkles")
+                                Label(
+                                    isShowingFallbackSummary ? "기본 여행 기록" : "AI의 여행 기록",
+                                    systemImage: isShowingFallbackSummary ? "doc.text" : "sparkles"
+                                )
                                     .font(.caption)
                                     .fontWeight(.bold)
-                                    .foregroundStyle(.purple)
+                                    .foregroundStyle(isShowingFallbackSummary ? Color.secondary : Color.purple)
                                 Spacer()
                             }
                             
@@ -77,8 +91,8 @@ struct RouteEditView: View {
                                                     .font(.system(size: 10, weight: .medium))
                                                     .padding(.horizontal, 8)
                                                     .padding(.vertical, 4)
-                                                    .background(Color.purple.opacity(0.1))
-                                                    .foregroundStyle(.purple)
+                                                    .background((isShowingFallbackSummary ? Color.secondary : Color.purple).opacity(0.1))
+                                                    .foregroundStyle(isShowingFallbackSummary ? Color.secondary : Color.purple)
                                                     .clipShape(Capsule())
                                             }
                                         }
@@ -110,7 +124,7 @@ struct RouteEditView: View {
                         .padding(.vertical, 8)
                     }
                 } footer: {
-                    if aiCaption == nil {
+                    if aiCaption == nil && aiAvailabilityIssue == nil {
                         Text("✨ 마법봉을 눌러 AI가 제안하는 매력적인 제목과 일기를 만들어보세요.")
                     }
                 }
@@ -187,10 +201,20 @@ struct RouteEditView: View {
             } message: {
                 Text("이 경로를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
             }
+            .alert("설정 앱을 열 수 없습니다", isPresented: $showingSettingsOpenError) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text("설정 앱에서 Apple Intelligence 상태를 직접 확인해주세요.")
+            }
             .task(id: route.id) {
                 syncStoredAISummary()
+                await refreshAIAvailabilityIssue()
             }
         }
+    }
+
+    private var isShowingFallbackSummary: Bool {
+        aiAvailabilityIssue != nil && route.aiSummaryConfidence == nil
     }
     
     private func deleteRecords(at offsets: IndexSet) {
@@ -210,28 +234,32 @@ struct RouteEditView: View {
         
         do {
             if #available(iOS 26.0, *) {
+                aiAvailabilityIssue = LocalAIService.shared.routeSummaryAvailabilityIssue()
+                if aiAvailabilityIssue != nil {
+                    await applyFallbackSummary(for: snapshot)
+                    try? modelContext.save()
+                    return
+                }
+
                 let summary = try await LocalAIService.shared.routeNarrator(snapshot: snapshot)
                 withAnimation {
                     self.route.apply(summary: summary)
                     syncStoredAISummary()
                 }
             } else {
-                // 하위 버전 fallback
-                try await Task.sleep(nanoseconds: 1_000_000_000)
-                withAnimation {
-                    self.route.applyStoredSummary(
-                        title: "✨ [AI] \(snapshot.startName) 여정",
-                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
-                        diary: "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다.",
-                        highlights: ["경로 기록 보완", "감성 요약 생성", "이동 흐름 정리"],
-                        toneRawValue: nil,
-                        confidence: nil
-                    )
-                    syncStoredAISummary()
-                }
+                aiAvailabilityIssue = .requiresIOS26
+                await applyFallbackSummary(for: snapshot)
             }
             try? modelContext.save()
         } catch {
+            if #available(iOS 26.0, *),
+               let localAIError = error as? LocalAIService.LocalAIError {
+                aiAvailabilityIssue = localAIError.availabilityIssue
+            } else {
+                aiAvailabilityIssue = .unavailable
+            }
+            await applyFallbackSummary(for: snapshot)
+            try? modelContext.save()
             print("AI summary generation failed: \(error.localizedDescription)")
         }
     }
@@ -259,5 +287,163 @@ struct RouteEditView: View {
         aiCaption = route.aiSummaryCaption
         aiDiary = route.aiSummaryDiary
         aiHighlights = route.aiSummaryHighlights
+    }
+
+    @MainActor
+    private func refreshAIAvailabilityIssue() async {
+        if #available(iOS 26.0, *) {
+            aiAvailabilityIssue = LocalAIService.shared.routeSummaryAvailabilityIssue()
+        } else {
+            aiAvailabilityIssue = .requiresIOS26
+        }
+    }
+
+    @MainActor
+    private func applyFallbackSummary(for snapshot: RouteStatsSnapshot) async {
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        withAnimation {
+            route.applyStoredSummary(
+                title: "\(snapshot.startName) 여정",
+                caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
+                diary: "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다.",
+                highlights: ["기본 요약", "경로 기록 보완", "이동 흐름 정리"],
+                toneRawValue: nil,
+                confidence: nil
+            )
+            syncStoredAISummary()
+        }
+    }
+
+    private func openAppleIntelligenceSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            showingSettingsOpenError = true
+            return
+        }
+        guard UIApplication.shared.canOpenURL(url) else {
+            showingSettingsOpenError = true
+            return
+        }
+        openURL(url)
+    }
+}
+
+private struct LocalAIAvailabilityBanner: View {
+    let issue: LocalAIAvailabilityIssue
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: issue.systemImageName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(issue.tintColor)
+                .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(issue.bannerTitle)
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+
+                Text(issue.bannerMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if issue.showsSettingsButton {
+                    Button(action: onOpenSettings) {
+                        Label("설정 열기", systemImage: "gearshape")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(issue.tintColor)
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(issue.tintColor.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(issue.tintColor.opacity(0.24), lineWidth: 1)
+        )
+        .padding(.vertical, 4)
+    }
+}
+
+private extension LocalAIAvailabilityIssue {
+    var bannerTitle: String {
+        switch self {
+        case .requiresIOS26:
+            return "AI 요약은 iOS 26 이상에서 지원됩니다"
+        case .deviceNotEligible:
+            return "이 기기는 Apple Intelligence를 지원하지 않습니다"
+        case .appleIntelligenceNotEnabled:
+            return "Apple Intelligence가 꺼져 있습니다"
+        case .modelNotReady:
+            return "AI 모델을 준비 중입니다"
+        case .unsupportedLocale:
+            return "현재 언어 설정에서는 AI 요약을 사용할 수 없습니다"
+        case .invalidOutput:
+            return "AI 응답을 적용하지 못했습니다"
+        case .unavailable:
+            return "AI 요약을 사용할 수 없습니다"
+        }
+    }
+
+    var bannerMessage: String {
+        switch self {
+        case .requiresIOS26:
+            return "현재 환경에서는 기본 요약을 대신 표시합니다."
+        case .deviceNotEligible:
+            return "지원 기기에서만 온디바이스 AI 여행 기록을 만들 수 있습니다. 지금은 기본 요약을 대신 표시합니다."
+        case .appleIntelligenceNotEnabled:
+            return "설정 앱에서 Apple Intelligence를 켜면 AI 여행 기록을 만들 수 있습니다. 지금은 기본 요약을 대신 표시합니다."
+        case .modelNotReady:
+            return "온디바이스 모델 다운로드 또는 준비가 끝나면 AI 요약을 사용할 수 있습니다. 지금은 기본 요약을 대신 표시합니다."
+        case .unsupportedLocale:
+            return "한국어 또는 현재 기기 언어를 지원하지 않는 상태입니다. 지금은 기본 요약을 대신 표시합니다."
+        case .invalidOutput:
+            return "생성된 응답 형식이 맞지 않아 기본 요약을 대신 표시합니다."
+        case .unavailable:
+            return "일시적으로 AI 요약을 만들 수 없어 기본 요약을 대신 표시합니다."
+        }
+    }
+
+    var showsSettingsButton: Bool {
+        self == .appleIntelligenceNotEnabled
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .appleIntelligenceNotEnabled:
+            return "gearshape"
+        case .modelNotReady:
+            return "clock"
+        case .deviceNotEligible, .requiresIOS26:
+            return "iphone.slash"
+        case .unsupportedLocale:
+            return "globe"
+        case .invalidOutput:
+            return "exclamationmark.triangle"
+        case .unavailable:
+            return "sparkles"
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .appleIntelligenceNotEnabled, .modelNotReady:
+            return .orange
+        case .deviceNotEligible, .requiresIOS26, .unsupportedLocale:
+            return .secondary
+        case .invalidOutput, .unavailable:
+            return .red
+        }
     }
 }
