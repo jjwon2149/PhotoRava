@@ -13,7 +13,9 @@ import SwiftData
 struct RouteBottomSheet: View {
     @ObservedObject var viewModel: RouteMapViewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @State private var isExporting = false
+    @State private var showingSettingsOpenError = false
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
@@ -22,6 +24,7 @@ struct RouteBottomSheet: View {
     @State private var aiCaption: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
+    @State private var aiAvailabilityIssue: LocalAIAvailabilityIssue?
     
     var body: some View {
         ScrollView {
@@ -73,6 +76,13 @@ struct RouteBottomSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
+                    if let aiAvailabilityIssue {
+                        LocalAIAvailabilityBanner(issue: aiAvailabilityIssue) {
+                            openAppleIntelligenceSettings()
+                        }
+                        .padding(.top, 4)
+                    }
+
                     Picker("AI 톤", selection: $selectedSummaryTone) {
                         ForEach(RouteSummaryTonePreference.allCases) { tone in
                             Text(tone.displayName).tag(tone)
@@ -83,14 +93,14 @@ struct RouteBottomSheet: View {
                     
                     if isGeneratingAI {
                         RouteAIActivityPanel(
-                            title: "AI 요약 생성 중",
+                            title: aiAvailabilityIssue == nil ? "AI 요약 생성 중" : "기본 요약 생성 중",
                             message: aiGenerationStatus,
                             showsSkeleton: true
                         )
                         .padding(.top, 8)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     } else if isAICompletionVisible {
-                        RouteAICompletionBadge(message: "AI 요약이 완성되었습니다")
+                        RouteAICompletionBadge(message: aiAvailabilityIssue == nil ? "AI 요약이 완성되었습니다" : "기본 요약이 준비되었습니다")
                             .padding(.top, 8)
                             .transition(.scale(scale: 0.94).combined(with: .opacity))
                     }
@@ -211,6 +221,12 @@ struct RouteBottomSheet: View {
         }
         .task(id: viewModel.route.id) {
             syncStoredAISummary()
+            await refreshAIAvailabilityIssue()
+        }
+        .alert("설정 앱을 열 수 없습니다", isPresented: $showingSettingsOpenError) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text("설정 앱에서 Apple Intelligence 상태를 직접 확인해주세요.")
         }
     }
     
@@ -336,47 +352,66 @@ struct RouteBottomSheet: View {
             }
             
             if #available(iOS 26.0, *) {
-                let summary = try await LocalAIService.shared.routeNarrator(
-                    snapshot: snapshot,
-                    tonePreference: selectedSummaryTone
-                )
-                withAnimation {
-                    aiGenerationStatus = "요약과 하이라이트를 반영하는 중..."
-                    viewModel.route.apply(summary: summary)
-                    syncStoredAISummary()
+                if let availabilityIssue = LocalAIService.shared.routeSummaryAvailabilityIssue() {
+                    aiAvailabilityIssue = availabilityIssue
+                    aiGenerationStatus = "기본 요약을 구성하는 중..."
+                    await applyFallbackSummary(for: snapshot)
+                } else {
+                    aiAvailabilityIssue = nil
+                    let summary = try await LocalAIService.shared.routeNarrator(
+                        snapshot: snapshot,
+                        tonePreference: selectedSummaryTone
+                    )
+                    withAnimation {
+                        aiGenerationStatus = "요약과 하이라이트를 반영하는 중..."
+                        viewModel.route.apply(summary: summary)
+                        syncStoredAISummary()
+                    }
                 }
             } else {
-                // 하위 버전 fallback
+                aiAvailabilityIssue = .requiresIOS26
                 aiGenerationStatus = "대체 요약을 구성하는 중..."
-                try await Task.sleep(nanoseconds: 800_000_000)
-                withAnimation {
-                    viewModel.route.applyStoredSummary(
-                        title: "✨ [AI] \(snapshot.startName) 여정",
-                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
-                        diary: viewModel.route.aiSummaryDiary,
-                        highlights: ["경로 기록 보완", "요약 생성 완료"],
-                        toneRawValue: selectedSummaryTone.rawValue,
-                        confidence: nil
-                    )
-                    syncStoredAISummary()
-                }
+                await applyFallbackSummary(for: snapshot)
             }
             try? modelContext.save()
             
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                isGeneratingAI = false
-                isAICompletionVisible = true
-            }
-            
-            try? await Task.sleep(for: .milliseconds(1600))
-            withAnimation(.easeOut(duration: 0.25)) {
-                isAICompletionVisible = false
-            }
+            await finishAISummaryGeneration()
         } catch {
-            withAnimation(.easeOut(duration: 0.2)) {
-                isGeneratingAI = false
-            }
+            aiAvailabilityIssue = availabilityIssue(from: error)
+            aiGenerationStatus = "기본 요약을 구성하는 중..."
+            await applyFallbackSummary(for: snapshot)
+            try? modelContext.save()
+            await finishAISummaryGeneration()
             print("AI Summary Generation Failed: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func applyFallbackSummary(for snapshot: RouteStatsSnapshot) async {
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        withAnimation {
+            viewModel.route.applyStoredSummary(
+                title: "\(snapshot.startName) 여정",
+                caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
+                diary: viewModel.route.aiSummaryDiary,
+                highlights: ["기본 요약", "경로 기록 보완", "요약 생성 완료"],
+                toneRawValue: selectedSummaryTone.rawValue,
+                confidence: nil
+            )
+            syncStoredAISummary()
+        }
+    }
+
+    @MainActor
+    private func finishAISummaryGeneration() async {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            isGeneratingAI = false
+            isAICompletionVisible = true
+        }
+
+        try? await Task.sleep(for: .milliseconds(1600))
+        withAnimation(.easeOut(duration: 0.25)) {
+            isAICompletionVisible = false
         }
     }
 
@@ -386,6 +421,32 @@ struct RouteBottomSheet: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: viewModel.route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+
+    @MainActor
+    private func refreshAIAvailabilityIssue() async {
+        if #available(iOS 26.0, *) {
+            aiAvailabilityIssue = LocalAIService.shared.routeSummaryAvailabilityIssue()
+        } else {
+            aiAvailabilityIssue = .requiresIOS26
+        }
+    }
+
+    private func availabilityIssue(from error: Error) -> LocalAIAvailabilityIssue {
+        if #available(iOS 26.0, *),
+           let localAIError = error as? LocalAIService.LocalAIError {
+            return localAIError.availabilityIssue
+        }
+        return .unavailable
+    }
+
+    private func openAppleIntelligenceSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString),
+              UIApplication.shared.canOpenURL(url) else {
+            showingSettingsOpenError = true
+            return
+        }
+        openURL(url)
     }
 
     private func routeShareSummaryText() -> String {
@@ -514,6 +575,128 @@ struct RouteAICompletionBadge: View {
         .background(Color.primaryBlue.opacity(0.1))
         .clipShape(Capsule())
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct LocalAIAvailabilityBanner: View {
+    let issue: LocalAIAvailabilityIssue
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: issue.systemImageName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(issue.tintColor)
+                .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(issue.bannerTitle)
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+
+                Text(issue.bannerMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if issue.showsSettingsButton {
+                    Button(action: onOpenSettings) {
+                        Label("설정 열기", systemImage: "gearshape")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(issue.tintColor)
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(issue.tintColor.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(issue.tintColor.opacity(0.24), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private extension LocalAIAvailabilityIssue {
+    var bannerTitle: String {
+        switch self {
+        case .requiresIOS26:
+            return "AI 요약은 iOS 26 이상에서 지원됩니다"
+        case .deviceNotEligible:
+            return "이 기기는 Apple Intelligence를 지원하지 않습니다"
+        case .appleIntelligenceNotEnabled:
+            return "Apple Intelligence가 꺼져 있습니다"
+        case .modelNotReady:
+            return "AI 모델을 준비 중입니다"
+        case .unsupportedLocale:
+            return "현재 언어 설정에서는 AI 요약을 사용할 수 없습니다"
+        case .invalidOutput:
+            return "AI 응답을 적용하지 못했습니다"
+        case .unavailable:
+            return "AI 요약을 사용할 수 없습니다"
+        }
+    }
+
+    var bannerMessage: String {
+        switch self {
+        case .requiresIOS26:
+            return "현재 환경에서는 기본 요약을 대신 표시합니다."
+        case .deviceNotEligible:
+            return "지원 기기에서만 온디바이스 AI 여행 기록을 만들 수 있습니다. 지금은 기본 요약을 대신 표시합니다."
+        case .appleIntelligenceNotEnabled:
+            return "설정 앱에서 Apple Intelligence를 켜면 AI 여행 기록을 만들 수 있습니다. 지금은 기본 요약을 대신 표시합니다."
+        case .modelNotReady:
+            return "온디바이스 모델 다운로드 또는 준비가 끝나면 AI 요약을 사용할 수 있습니다. 지금은 기본 요약을 대신 표시합니다."
+        case .unsupportedLocale:
+            return "한국어 또는 현재 기기 언어를 지원하지 않는 상태입니다. 지금은 기본 요약을 대신 표시합니다."
+        case .invalidOutput:
+            return "생성된 응답 형식이 맞지 않아 기본 요약을 대신 표시합니다."
+        case .unavailable:
+            return "일시적으로 AI 요약을 만들 수 없어 기본 요약을 대신 표시합니다."
+        }
+    }
+
+    var showsSettingsButton: Bool {
+        self == .appleIntelligenceNotEnabled
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .appleIntelligenceNotEnabled:
+            return "gearshape"
+        case .modelNotReady:
+            return "clock"
+        case .deviceNotEligible, .requiresIOS26:
+            return "iphone.slash"
+        case .unsupportedLocale:
+            return "globe"
+        case .invalidOutput:
+            return "exclamationmark.triangle"
+        case .unavailable:
+            return "sparkles"
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .appleIntelligenceNotEnabled, .modelNotReady:
+            return .orange
+        case .deviceNotEligible, .requiresIOS26, .unsupportedLocale:
+            return .secondary
+        case .invalidOutput, .unavailable:
+            return .red
+        }
     }
 }
 
