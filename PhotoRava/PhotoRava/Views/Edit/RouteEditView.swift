@@ -18,6 +18,7 @@ struct RouteEditView: View {
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
+    @State private var aiGenerationStatus = "AI가 경로를 요약하는 중..."
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
@@ -47,6 +48,16 @@ struct RouteEditView: View {
                                 .buttonStyle(.borderless)
                             }
                         }
+                    }
+
+                    if isGeneratingAI {
+                        RouteAIActivityPanel(
+                            title: "AI 요약 생성 중",
+                            message: aiGenerationStatus,
+                            showsSkeleton: true
+                        )
+                        .padding(.top, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     
                     // AI 요약 결과 및 감성 일기 미리보기
@@ -118,16 +129,21 @@ struct RouteEditView: View {
                                     isDisabled: isGeneratingAI
                                 )
 
-                                Button {
-                                    Task { await generateAISummary() }
-                                } label: {
-                                    Label("다시 만들기", systemImage: "arrow.clockwise")
-                                        .font(.caption2)
-                                        .fontWeight(.medium)
+                                if isGeneratingAI {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Button {
+                                        Task { await generateAISummary() }
+                                    } label: {
+                                        Label("다시 만들기", systemImage: "arrow.clockwise")
+                                            .font(.caption2)
+                                            .fontWeight(.medium)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.purple)
+                                    .controlSize(.mini)
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.purple)
-                                .controlSize(.mini)
                             }
                         }
                         .padding(.vertical, 8)
@@ -235,12 +251,17 @@ struct RouteEditView: View {
     
     @MainActor
     private func generateAISummary() async {
+        guard !isGeneratingAI else { return }
         isGeneratingAI = true
-        defer { isGeneratingAI = false }
+        aiGenerationStatus = "경로 통계를 정리하는 중..."
         
         let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
         
         do {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                aiGenerationStatus = "AI가 경로를 요약하는 중..."
+            }
+
             if #available(iOS 26.0, *) {
                 let summary = try await LocalAIService.shared.routeNarrator(
                     snapshot: snapshot,
@@ -252,7 +273,8 @@ struct RouteEditView: View {
                 }
             } else {
                 // 하위 버전 fallback
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                aiGenerationStatus = "대체 요약을 구성하는 중..."
+                try await Task.sleep(nanoseconds: 800_000_000)
                 withAnimation {
                     self.route.applyStoredSummary(
                         title: "✨ [AI] \(snapshot.startName) 여정",
@@ -269,6 +291,7 @@ struct RouteEditView: View {
         } catch {
             print("AI summary generation failed: \(error.localizedDescription)")
         }
+        isGeneratingAI = false
     }
     
     private func saveChanges() async {
