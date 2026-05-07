@@ -2750,8 +2750,8 @@ final class ExifStampViewModel: ObservableObject {
             let sourceView = top.view ?? root.view
             popover.sourceView = sourceView
             popover.sourceRect = CGRect(
-                x: sourceView.bounds.midX,
-                y: sourceView.bounds.midY,
+                x: sourceView!.bounds.midX,
+                y: sourceView!.bounds.midY,
                 width: 0,
                 height: 0
             )
