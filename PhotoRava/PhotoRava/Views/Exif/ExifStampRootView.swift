@@ -33,18 +33,21 @@ struct ExifStampRootView: View {
 
                 Group {
                     if viewModel.originalImage != nil {
-                        TabView(selection: $selectedTab) {
-                            ExifStampLayoutTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
-                                .tabItem { Label("프레임", systemImage: "rectangle.inset.filled") }
-                                .tag(ExifStampTab.layout)
+                        VStack(spacing: 0) {
+                            Picker("EXIF 편집 단계", selection: $selectedTab) {
+                                ForEach(ExifStampTab.allCases) { tab in
+                                    Label(tab.label, systemImage: tab.systemImage)
+                                        .tag(tab)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .padding(.horizontal)
+                            .padding(.top, 10)
+                            .padding(.bottom, 8)
+                            .background(.bar)
+                            .accessibilityHint("프레임, 테마, 내보내기 설정 화면을 전환합니다.")
 
-                            ExifStampThemeTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
-                                .tabItem { Label("테마", systemImage: "paintpalette") }
-                                .tag(ExifStampTab.theme)
-
-                            ExifStampExportTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
-                                .tabItem { Label("내보내기", systemImage: "square.and.arrow.up") }
-                                .tag(ExifStampTab.export)
+                            selectedTabContent
                         }
                     } else {
                         emptyStateView
@@ -53,24 +56,31 @@ struct ExifStampRootView: View {
             }
             .navigationTitle("EXIF")
             .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                PhotosPicker(
-                                    selection: $viewModel.selectedItem,
-                                    matching: .images
-                                ) {
-                                    Image(systemName: "photo.badge.plus")
-                                }
-                                .disabled(viewModel.isProcessing)
-                            }
-            
-                            ToolbarItem(placement: .topBarTrailing) {                    PhotosPicker(
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    PhotosPicker(
+                        selection: $viewModel.selectedItem,
+                        matching: .images
+                    ) {
+                        Label("사진 선택", systemImage: "photo.badge.plus")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                    }
+                    .disabled(viewModel.isProcessing)
+                    .accessibilityLabel("사진 선택")
+                    .accessibilityHint("EXIF 스탬프를 적용할 사진 한 장을 선택합니다.")
+
+                    PhotosPicker(
                         selection: $viewModel.batchSelectedItems,
                         matching: .images
                     ) {
-                        Image(systemName: "photo.on.rectangle.angled")
+                        Label("여러 장 선택", systemImage: "photo.on.rectangle.angled")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
                     }
                     .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
+                    .accessibilityLabel("여러 장 선택")
+                    .accessibilityHint("같은 설정으로 내보낼 사진 여러 장을 선택합니다.")
                 }
             }
             .overlay(alignment: .top) {
@@ -79,8 +89,9 @@ struct ExifStampRootView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .padding(.top, 12)
+                    .clipShape(Capsule())
+                    .padding(.top, 12)
+                    .accessibilityLabel("사진 처리 중")
                 } else if viewModel.batchExportState.isRunning {
                     HStack(spacing: 10) {
                         ProgressView(value: viewModel.batchExportState.progressFraction)
@@ -98,6 +109,8 @@ struct ExifStampRootView: View {
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
                     .padding(.top, 12)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("일괄 내보내기 진행 중")
                 }
             }
             .alert("오류", isPresented: $viewModel.showingError) {
@@ -118,6 +131,18 @@ struct ExifStampRootView: View {
             .fullScreenCover(isPresented: $showingFullScreenPreview) {
                 ExifStampFullScreenPreview(image: viewModel.renderedImage)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var selectedTabContent: some View {
+        switch selectedTab {
+        case .layout:
+            ExifStampLayoutTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+        case .theme:
+            ExifStampThemeTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
+        case .export:
+            ExifStampExportTab(viewModel: viewModel, showingFullScreenPreview: $showingFullScreenPreview)
         }
     }
     
@@ -150,27 +175,25 @@ struct ExifStampRootView: View {
                     selection: $viewModel.selectedItem,
                     matching: .images
                 ) {
-                    Text("사진 선택")
+                    Label("사진 선택", systemImage: "photo.badge.plus")
                         .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(width: 200, height: 50)
-                        .background(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 220, height: 50)
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isProcessing)
+                .accessibilityHint("EXIF 스탬프를 적용할 사진 한 장을 선택합니다.")
 
                 PhotosPicker(
                     selection: $viewModel.batchSelectedItems,
                     matching: .images
                 ) {
-                    Text("여러 장 선택")
+                    Label("여러 장 선택", systemImage: "photo.on.rectangle.angled")
                         .font(.headline)
-                        .foregroundStyle(.primary)
-                        .frame(width: 200, height: 50)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 220, height: 50)
                 }
+                .buttonStyle(.bordered)
                 .disabled(viewModel.isProcessing || viewModel.batchExportState.isRunning)
+                .accessibilityHint("같은 설정으로 내보낼 사진 여러 장을 선택합니다.")
             }
         }
         .padding()
@@ -178,10 +201,28 @@ struct ExifStampRootView: View {
     }
 }
 
-enum ExifStampTab: Hashable {
+enum ExifStampTab: String, CaseIterable, Identifiable, Hashable {
     case layout
     case theme
     case export
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .layout: return "프레임"
+        case .theme: return "테마"
+        case .export: return "내보내기"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .layout: return "rectangle.inset.filled"
+        case .theme: return "paintpalette"
+        case .export: return "square.and.arrow.up"
+        }
+    }
 }
 
 enum ExifStampExportTarget: String, CaseIterable, Identifiable {
@@ -432,8 +473,12 @@ private struct ExifStampPreviewCard: View {
                         .font(.system(size: 28))
                         .foregroundStyle(.primary)
                         .background(Circle().fill(.ultraThinMaterial))
-                        .padding(8)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("미리보기 확대")
+                .accessibilityHint("렌더링된 사진을 전체 화면으로 확인합니다.")
             }
 
             if isRendering {
@@ -443,9 +488,11 @@ private struct ExifStampPreviewCard: View {
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel("미리보기 렌더링 중")
             }
         }
         .padding(.horizontal)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -735,7 +782,7 @@ private struct ExifStampLayoutTab: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { _, source in
+                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { index, source in
                         Button {
                             Task { await viewModel.loadBatchPreviewSource(source) }
                         } label: {
@@ -769,6 +816,9 @@ private struct ExifStampLayoutTab: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("사진 \(index + 1) 미리보기")
+                        .accessibilityValue(viewModel.activePhotoIdentifier == source.identifier ? "선택됨" : "선택 안 됨")
+                        .accessibilityHint("이 사진을 편집 미리보기로 불러옵니다.")
                         .task(id: source.identifier) {
                             _ = await viewModel.thumbnailImage(for: source)
                         }
@@ -1306,7 +1356,7 @@ private struct ExifStampExportTab: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { _, source in
+                    ForEach(Array(viewModel.batchSources.enumerated()), id: \.element.identifier) { index, source in
                         Button {
                             selectedBatchPreviewIdentifier = source.identifier
                             Task { await viewModel.loadBatchPreviewSource(source) }
@@ -1341,6 +1391,9 @@ private struct ExifStampExportTab: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("사진 \(index + 1) 프리뷰")
+                        .accessibilityValue(selectedBatchPreviewIdentifier == source.identifier ? "선택됨" : "선택 안 됨")
+                        .accessibilityHint("이 사진을 내보내기 미리보기로 불러옵니다.")
                         .task(id: source.identifier) {
                             _ = await viewModel.thumbnailImage(for: source)
                         }
