@@ -18,6 +18,7 @@ struct RouteEditView: View {
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
+    @State private var aiErrorMessage: String?
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
@@ -52,6 +53,12 @@ struct RouteEditView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(isGeneratingAI)
+
+                    if let aiErrorMessage {
+                        RouteAIErrorBanner(message: aiErrorMessage)
+                            .padding(.top, 4)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                     
                     // AI 요약 결과 및 감성 일기 미리보기
                     if let caption = aiCaption {
@@ -213,6 +220,7 @@ struct RouteEditView: View {
     @MainActor
     private func generateAISummary() async {
         isGeneratingAI = true
+        aiErrorMessage = nil
         defer { isGeneratingAI = false }
         
         let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
@@ -244,6 +252,9 @@ struct RouteEditView: View {
             }
             try? modelContext.save()
         } catch {
+            withAnimation(.easeOut(duration: 0.2)) {
+                aiErrorMessage = aiSummaryErrorMessage(for: error)
+            }
             print("AI summary generation failed: \(error.localizedDescription)")
         }
     }
@@ -274,5 +285,18 @@ struct RouteEditView: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+
+    private func aiSummaryErrorMessage(for error: Error) -> String {
+        if #available(iOS 26.0, *),
+           let localAIError = error as? LocalAIService.LocalAIError {
+            switch localAIError {
+            case .notAvailable(_):
+                return "Apple Intelligence를 사용할 수 없습니다"
+            case .unsupportedLocale, .invalidOutput:
+                break
+            }
+        }
+        return "AI 요약 생성에 실패했습니다. 다시 시도해 주세요."
     }
 }

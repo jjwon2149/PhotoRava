@@ -19,6 +19,7 @@ struct RouteBottomSheet: View {
     @State private var isGeneratingAI = false
     @State private var aiGenerationStatus = "AI가 경로를 요약하는 중..."
     @State private var isAICompletionVisible = false
+    @State private var aiErrorMessage: String?
     @State private var aiCaption: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
@@ -93,6 +94,12 @@ struct RouteBottomSheet: View {
                         RouteAICompletionBadge(message: "AI 요약이 완성되었습니다")
                             .padding(.top, 8)
                             .transition(.scale(scale: 0.94).combined(with: .opacity))
+                    }
+
+                    if let aiErrorMessage {
+                        RouteAIErrorBanner(message: aiErrorMessage)
+                            .padding(.top, 8)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     
                     // AI 요약 결과 표시
@@ -325,6 +332,7 @@ struct RouteBottomSheet: View {
     private func generateAISummary() async {
         guard !isGeneratingAI else { return }
         isGeneratingAI = true
+        aiErrorMessage = nil
         aiGenerationStatus = "경로 통계를 정리하는 중..."
         isAICompletionVisible = false
         
@@ -375,6 +383,7 @@ struct RouteBottomSheet: View {
         } catch {
             withAnimation(.easeOut(duration: 0.2)) {
                 isGeneratingAI = false
+                aiErrorMessage = aiSummaryErrorMessage(for: error)
             }
             print("AI Summary Generation Failed: \(error.localizedDescription)")
         }
@@ -401,6 +410,19 @@ struct RouteBottomSheet: View {
         }
 
         return parts.joined(separator: "\n")
+    }
+
+    private func aiSummaryErrorMessage(for error: Error) -> String {
+        if #available(iOS 26.0, *),
+           let localAIError = error as? LocalAIService.LocalAIError {
+            switch localAIError {
+            case .notAvailable(_):
+                return "Apple Intelligence를 사용할 수 없습니다"
+            case .unsupportedLocale, .invalidOutput:
+                break
+            }
+        }
+        return "AI 요약 생성에 실패했습니다. 다시 시도해 주세요."
     }
 }
 
@@ -513,6 +535,33 @@ struct RouteAICompletionBadge: View {
         .padding(.vertical, 7)
         .background(Color.primaryBlue.opacity(0.1))
         .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct RouteAIErrorBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+
+            Text(message)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.red.opacity(0.2), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
 }
