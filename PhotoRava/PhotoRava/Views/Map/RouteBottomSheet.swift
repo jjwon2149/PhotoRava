@@ -104,14 +104,27 @@ struct RouteBottomSheet: View {
                             
                             if !aiHighlights.isEmpty {
                                 HStack(spacing: 6) {
-                                    ForEach(aiHighlights, id: \.self) { highlight in
-                                        Text(highlight)
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.purple.opacity(0.1))
-                                            .foregroundStyle(.purple)
-                                            .clipShape(Capsule())
+                                    ForEach(aiHighlights.indices, id: \.self) { index in
+                                        HStack(spacing: 4) {
+                                            Text(aiHighlights[index])
+                                                .lineLimit(1)
+
+                                            Button {
+                                                removeAIHighlight(at: index)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("\(aiHighlights[index]) 하이라이트 삭제")
+                                        }
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .padding(.leading, 8)
+                                        .padding(.trailing, 6)
+                                        .padding(.vertical, 4)
+                                        .background(Color.purple.opacity(0.1))
+                                        .foregroundStyle(.purple)
+                                        .clipShape(Capsule())
                                     }
                                 }
                             }
@@ -403,6 +416,13 @@ struct RouteBottomSheet: View {
         if let storedTone = RouteSummaryTonePreference(rawValue: viewModel.route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
         }
+    }
+
+    private func removeAIHighlight(at index: Int) {
+        guard aiHighlights.indices.contains(index) else { return }
+        aiHighlights.remove(at: index)
+        viewModel.route.aiSummaryHighlights = aiHighlights
+        try? modelContext.save()
     }
 
     private func routeShareSummaryText() -> String {
