@@ -20,6 +20,7 @@ struct RouteBottomSheet: View {
     @State private var aiGenerationStatus = "AI가 경로를 요약하는 중..."
     @State private var isAICompletionVisible = false
     @State private var aiCaption: String?
+    @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
     
@@ -117,6 +118,14 @@ struct RouteBottomSheet: View {
                                     .buttonStyle(.borderless)
                                     .tint(.purple)
                                 }
+                            }
+
+                            if let diary = aiDiary {
+                                Text(diary)
+                                    .font(.system(size: 14, weight: .regular, design: .serif))
+                                    .lineSpacing(4)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.vertical, 4)
                             }
                             
                             if !aiHighlights.isEmpty {
@@ -382,6 +391,7 @@ struct RouteBottomSheet: View {
 
     private func syncStoredAISummary() {
         aiCaption = viewModel.route.aiSummaryCaption
+        aiDiary = viewModel.route.aiSummaryDiary
         aiHighlights = viewModel.route.aiSummaryHighlights
         if let storedTone = RouteSummaryTonePreference(rawValue: viewModel.route.aiSummaryToneRawValue ?? "") {
             selectedSummaryTone = storedTone
