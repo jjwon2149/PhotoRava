@@ -2603,6 +2603,17 @@ final class ExifStampViewModel: ObservableObject {
         while let presented = top.presentedViewController {
             top = presented
         }
+        if let popover = controller.popoverPresentationController {
+            let sourceView = top.view ?? root.view
+            popover.sourceView = sourceView
+            popover.sourceRect = CGRect(
+                x: sourceView.bounds.midX,
+                y: sourceView.bounds.midY,
+                width: 0,
+                height: 0
+            )
+            popover.permittedArrowDirections = []
+        }
         top.present(controller, animated: true)
     }
 
