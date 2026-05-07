@@ -524,6 +524,7 @@ final class LocalAIService {
     private func routeSummaryPrompt(for snapshot: RouteStatsSnapshot) -> String {
         let roads = snapshot.visitedRoadsTopN.isEmpty ? "없음" : snapshot.visitedRoadsTopN.joined(separator: ", ")
         let areas = snapshot.areaKeywords.isEmpty ? "없음" : snapshot.areaKeywords.prefix(5).joined(separator: ", ")
+        let editedHighlights = snapshot.userEditedHighlights.isEmpty ? "없음" : snapshot.userEditedHighlights.joined(separator: ", ")
 
         return """
         다음 경로 통계를 바탕으로 한국어 RouteSummary를 생성하세요.
@@ -532,7 +533,7 @@ final class LocalAIService {
         - caption에는 총 거리(km)와 소요 시간(분)을 반드시 포함
         - diaryEntry는 3~5문장
         - highlights는 2~3개, 각 20자 이내
-        - userEditedTitle이 있으면 완전히 무시하지 말고 참고하세요.
+        - userEditedTitle, userEditedCaption, userEditedDiaryEntry, userEditedHighlights가 있으면 완전히 무시하지 말고 참고하세요.
 
         dateRange: \(snapshot.dateRange)
         distanceKm: \(String(format: "%.1f", snapshot.distanceKm))
@@ -544,6 +545,9 @@ final class LocalAIService {
         visitedRoadsTopN: \(roads)
         areaKeywords: \(areas)
         userEditedTitle: \(snapshot.userEditedTitle ?? "없음")
+        userEditedCaption: \(snapshot.userEditedCaption ?? "없음")
+        userEditedDiaryEntry: \(snapshot.userEditedDiaryEntry ?? "없음")
+        userEditedHighlights: \(editedHighlights)
         """
     }
 
@@ -567,7 +571,10 @@ final class LocalAIService {
             ? "\(topRoad) \(snapshot.timeOfDay ?? "주간") 기록"
             : editedTitle
         let title = clampedTitle(titleCandidate, fallback: "\(snapshot.timeOfDay ?? "주간") 경로 기록")
-        let caption = "약 \(distanceText)km를 \(snapshot.durationMin)분 동안 이동하며 \(photoText)을 남긴 여정."
+        let editedCaption = normalizedText(snapshot.userEditedCaption ?? "")
+        let caption = editedCaption.isEmpty
+            ? "약 \(distanceText)km를 \(snapshot.durationMin)분 동안 이동하며 \(photoText)을 남긴 여정."
+            : editedCaption
 
         let narrativeFocus = snapshot.visitedRoadsTopN.prefix(2).joined(separator: ", ")
         let diaryThirdSentence: String
@@ -582,19 +589,25 @@ final class LocalAIService {
         총 \(distanceText)km를 \(snapshot.durationMin)분 동안 움직이며 \(photoText)으로 장면을 기록했습니다. \
         \(diaryThirdSentence)
         """
+        let editedDiary = normalizedText(snapshot.userEditedDiaryEntry ?? "")
 
-        let highlights = Array(
+        let generatedHighlights = Array(
             NSOrderedSet(array: [
                 shortLabel(from: snapshot.timeOfDay ?? "주간 이동"),
                 shortLabel(from: topRoad),
                 shortLabel(from: "\(snapshot.durationMin)분 기록")
             ])
         ) as? [String] ?? []
+        let editedHighlights = snapshot.userEditedHighlights
+            .map(normalizedText)
+            .filter { !$0.isEmpty }
+            .map { String($0.prefix(20)) }
+        let highlights = editedHighlights.isEmpty ? generatedHighlights : editedHighlights
 
         return RouteSummary(
             title: title,
             caption: caption,
-            diaryEntry: normalizedText(diary),
+            diaryEntry: editedDiary.isEmpty ? normalizedText(diary) : editedDiary,
             highlights: Array(highlights.prefix(3)).map { String($0.prefix(20)) },
             tone: editedTitle.isEmpty ? .warm : .documentary,
             confidence: 0.62
