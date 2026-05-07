@@ -393,14 +393,18 @@ struct RouteBottomSheet: View {
                 // 하위 버전 fallback
                 aiGenerationStatus = "대체 요약을 구성하는 중..."
                 try await Task.sleep(nanoseconds: 800_000_000)
+                let summary = RouteStoredSummary.fallback(
+                    for: snapshot,
+                    tonePreference: selectedSummaryTone
+                )
                 withAnimation {
                     viewModel.route.applyStoredSummary(
-                        title: "✨ [AI] \(snapshot.startName) 여정",
-                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
-                        diary: viewModel.route.aiSummaryDiary,
-                        highlights: ["경로 기록 보완", "요약 생성 완료"],
-                        toneRawValue: selectedSummaryTone.rawValue,
-                        confidence: nil
+                        title: summary.title,
+                        caption: summary.caption,
+                        diary: summary.diary,
+                        highlights: summary.highlights,
+                        toneRawValue: summary.toneRawValue,
+                        confidence: summary.confidence
                     )
                     syncStoredAISummary()
                     aiErrorMessage = aiSummaryFallbackMessage(for: .requiresIOS26)

@@ -353,13 +353,17 @@ class AnalysisViewModel: ObservableObject {
                     route.apply(summary: summary)
                 }
             } else {
+                let summary = RouteStoredSummary.fallback(
+                    for: snapshot,
+                    tonePreference: .warm
+                )
                 route.applyStoredSummary(
-                    title: nil,
-                    caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "주간")의 기록",
-                    diary: nil,
-                    highlights: [snapshot.timeOfDay ?? "주간", "\(snapshot.durationMin)분 기록"],
-                    toneRawValue: RouteSummaryTonePreference.warm.rawValue,
-                    confidence: nil
+                    title: summary.title,
+                    caption: summary.caption,
+                    diary: summary.diary,
+                    highlights: summary.highlights,
+                    toneRawValue: summary.toneRawValue,
+                    confidence: summary.confidence
                 )
             }
             
