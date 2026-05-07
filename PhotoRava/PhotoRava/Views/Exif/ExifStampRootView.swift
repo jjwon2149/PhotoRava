@@ -2544,6 +2544,18 @@ final class ExifStampViewModel: ObservableObject {
     
     private func fetchThumbnailImage(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
         await withCheckedContinuation { continuation in
+            var didResume = false
+            let resumeLock = NSLock()
+
+            func resumeOnce(with image: UIImage?) {
+                resumeLock.lock()
+                defer { resumeLock.unlock() }
+
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: image)
+            }
+
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
             options.resizeMode = .fast
@@ -2555,8 +2567,11 @@ final class ExifStampViewModel: ObservableObject {
                 targetSize: targetSize,
                 contentMode: .aspectFit,
                 options: options
-            ) { image, _ in
-                continuation.resume(returning: image)
+            ) { image, info in
+                if (info?[PHImageResultIsDegradedKey] as? Bool) == true {
+                    return
+                }
+                resumeOnce(with: image)
             }
         }
     }
