@@ -18,6 +18,7 @@ struct RouteEditView: View {
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
+    @State private var aiErrorMessage: String?
     @State private var aiCaption: String?
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
@@ -47,6 +48,12 @@ struct RouteEditView: View {
                                 .buttonStyle(.borderless)
                             }
                         }
+                    }
+
+                    if let aiErrorMessage {
+                        RouteAIErrorBanner(message: aiErrorMessage)
+                            .padding(.top, 8)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     
                     // AI 요약 결과 및 감성 일기 미리보기
@@ -235,7 +242,9 @@ struct RouteEditView: View {
     
     @MainActor
     private func generateAISummary() async {
+        guard !isGeneratingAI else { return }
         isGeneratingAI = true
+        aiErrorMessage = nil
         defer { isGeneratingAI = false }
         
         let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
@@ -267,8 +276,20 @@ struct RouteEditView: View {
             }
             try? modelContext.save()
         } catch {
+            withAnimation(.easeOut(duration: 0.2)) {
+                aiErrorMessage = aiSummaryErrorMessage(for: error)
+            }
             print("AI summary generation failed: \(error.localizedDescription)")
         }
+    }
+
+    private func aiSummaryErrorMessage(for error: Error) -> String {
+        if #available(iOS 26.0, *),
+           let localAIError = error as? LocalAIService.LocalAIError {
+            return localAIError.errorDescription ?? "AI 요약 생성에 실패했습니다. 다시 시도해 주세요."
+        }
+
+        return "AI 요약 생성에 실패했습니다. 다시 시도해 주세요."
     }
     
     private func saveChanges() async {
