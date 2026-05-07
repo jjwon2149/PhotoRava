@@ -392,8 +392,24 @@ private struct ExifStampCropView: View {
                             .allowsHitTesting(false)
                         }
                         .frame(width: containerSize.width, height: containerSize.height)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("자르기 영역")
+                        .accessibilityValue(cropAccessibilityValue(containerSize: containerSize, ratio: ratio))
+                        .accessibilityHint("위 또는 아래로 쓸어 확대율을 조정합니다. 이동 버튼과 확대 슬라이더도 사용할 수 있습니다.")
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment:
+                                adjustScale(by: 0.1)
+                            case .decrement:
+                                adjustScale(by: -0.1)
+                            @unknown default:
+                                break
+                            }
+                        }
                     }
                 }
+
+                cropAdjustmentControls
                 
                 // Aspect Ratio Selector
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -444,6 +460,78 @@ private struct ExifStampCropView: View {
             return CGSize(width: bounds.width, height: max(1, bounds.height - 200))
         }
         return lastContainerSize
+    }
+
+    private var scaleRange: ClosedRange<Double> {
+        let minimum = minimumScale(imageSize: image.size, containerSize: effectiveContainerSize, ratio: activeCropRatio)
+        return Double(minimum)...Double(maxScale)
+    }
+
+    private var scaleBinding: Binding<Double> {
+        Binding(
+            get: { min(max(Double(scale), scaleRange.lowerBound), scaleRange.upperBound) },
+            set: { setScale(CGFloat($0)) }
+        )
+    }
+
+    private var cropAdjustmentControls: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Button {
+                    adjustScale(by: -0.1)
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("축소")
+
+                Slider(value: scaleBinding, in: scaleRange, step: 0.01) {
+                    Text("확대율")
+                } minimumValueLabel: {
+                    Image(systemName: "minus")
+                } maximumValueLabel: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("자르기 확대율")
+                .accessibilityValue("\(scalePercent)%")
+
+                Button {
+                    adjustScale(by: 0.1)
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("확대")
+            }
+
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                cropMoveButton(systemImage: "arrow.left", label: "왼쪽으로 이동", delta: CGSize(width: 1, height: 0))
+                VStack(spacing: 8) {
+                    cropMoveButton(systemImage: "arrow.up", label: "위로 이동", delta: CGSize(width: 0, height: 1))
+                    cropMoveButton(systemImage: "arrow.down", label: "아래로 이동", delta: CGSize(width: 0, height: -1))
+                }
+                cropMoveButton(systemImage: "arrow.right", label: "오른쪽으로 이동", delta: CGSize(width: -1, height: 0))
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+    }
+
+    private func cropMoveButton(systemImage: String, label: String, delta: CGSize) -> some View {
+        Button {
+            nudgeOffset(delta)
+        } label: {
+            Image(systemName: systemImage)
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(label)
+        .accessibilityValue(cropPositionAccessibilityValue)
     }
 
     private func fittedImageSize(imageSize: CGSize, containerSize: CGSize) -> CGSize {
@@ -500,6 +588,35 @@ private struct ExifStampCropView: View {
         lastOffset = offset
     }
 
+    private func setScale(_ proposed: CGFloat) {
+        let containerSize = effectiveContainerSize
+        let ratio = activeCropRatio
+        scale = clampedScale(proposed, imageSize: image.size, containerSize: containerSize, ratio: ratio)
+        offset = clampedOffset(offset, imageSize: image.size, containerSize: containerSize, ratio: ratio, scale: scale)
+        lastScale = scale
+        lastOffset = offset
+    }
+
+    private func adjustScale(by delta: CGFloat) {
+        setScale(scale + delta)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func nudgeOffset(_ direction: CGSize) {
+        let containerSize = effectiveContainerSize
+        let ratio = activeCropRatio
+        let cropSize = cropWindowSize(containerSize: containerSize, ratio: ratio)
+        let step = max(8, min(cropSize.width, cropSize.height) * 0.08)
+        let proposed = CGSize(
+            width: offset.width + direction.width * step,
+            height: offset.height + direction.height * step
+        )
+
+        offset = clampedOffset(proposed, imageSize: image.size, containerSize: containerSize, ratio: ratio, scale: scale)
+        lastOffset = offset
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     private func resetTransform(imageSize: CGSize, containerSize: CGSize, ratio: CGFloat) {
         scale = minimumScale(imageSize: imageSize, containerSize: containerSize, ratio: ratio)
         offset = .zero
@@ -527,6 +644,36 @@ private struct ExifStampCropView: View {
 
         cropRect = CGRect(x: normX, y: normY, width: normCropW, height: normCropH)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private var scalePercent: Int {
+        Int((scale * 100).rounded())
+    }
+
+    private var cropPositionAccessibilityValue: String {
+        cropAccessibilityValue(containerSize: effectiveContainerSize, ratio: activeCropRatio)
+    }
+
+    private func cropAccessibilityValue(containerSize: CGSize, ratio: CGFloat) -> String {
+        let fittedSize = fittedImageSize(imageSize: image.size, containerSize: containerSize)
+        let cropSize = cropWindowSize(containerSize: containerSize, ratio: ratio)
+        let displayedSize = CGSize(width: fittedSize.width * scale, height: fittedSize.height * scale)
+        let maxX = max(0, (displayedSize.width - cropSize.width) / 2)
+        let maxY = max(0, (displayedSize.height - cropSize.height) / 2)
+        let horizontal = cropPositionDescription(offset: offset.width, maximum: maxX, negative: "오른쪽", positive: "왼쪽")
+        let vertical = cropPositionDescription(offset: offset.height, maximum: maxY, negative: "아래", positive: "위")
+        return "확대 \(scalePercent)%, 가로 \(horizontal), 세로 \(vertical)"
+    }
+
+    private func cropPositionDescription(offset: CGFloat, maximum: CGFloat, negative: String, positive: String) -> String {
+        guard maximum > 0 else { return "중앙" }
+
+        let percent = Int((abs(offset) / maximum * 100).rounded())
+        if percent < 2 {
+            return "중앙"
+        }
+
+        return "\(offset < 0 ? negative : positive) \(percent)%"
     }
     
     struct RatioButton: View {
