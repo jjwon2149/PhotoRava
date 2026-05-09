@@ -1,31 +1,74 @@
 # PhotoRava
 
-PhotoRava는 선택한 사진으로 이동 경로를 복원하고, 사진에 EXIF 스탬프를 새겨 내보내는 단일 iOS 앱입니다. 실제 소스 루트는 `PhotoRava/PhotoRava`이며, 핵심 영속 모델은 `Route`와 `PhotoRecord`입니다. 지원 기기와 iOS 26+ 환경에서는 온디바이스 AI 요약/지오코딩 보정이 동작하고, 지원되지 않는 경우 코드에 fallback 경로가 있습니다.
+PhotoRava is a SwiftUI iOS app that turns photo metadata into a travel route and exports clean EXIF-stamped images. It is built as a single app target with SwiftData persistence, Photos/Vision metadata extraction, MapKit route visualization, and optional on-device AI fallback paths for devices that support FoundationModels.
+
+## Product Snapshot
+
+| Route Library | Route Map | Timeline |
+| --- | --- | --- |
+| ![PhotoRava route library](marketing-screenshots/01-route-list.png) | ![PhotoRava route map](marketing-screenshots/02-route-map.png) | ![PhotoRava timeline](marketing-screenshots/03-timeline.png) |
+
+| EXIF Frame | EXIF Themes | Original Preview |
+| --- | --- | --- |
+| ![PhotoRava EXIF frame](marketing-screenshots/04-exif-frame.png) | ![PhotoRava EXIF theme picker](marketing-screenshots/05-exif-theme.png) | ![PhotoRava original preview](marketing-screenshots/06-original-preview.png) |
+
+## What It Demonstrates
+
+- End-to-end iOS product work: photo selection, route reconstruction, timeline/map review, editing, and export.
+- Practical privacy posture: photo/location permissions are explicit, local-first, and documented in `privacy-policy.md`.
+- Resilient feature design: AI-assisted geocoding and summaries are optional, with fallback behavior for unsupported devices.
+- Recruiter-friendly code organization: feature views, domain models, services, and public docs are separated enough to review quickly.
+
+## Core Features
+
+- **Route reconstruction**: reads GPS metadata from selected photos and derives route distance, time range, locations, and map coordinates.
+- **OCR-assisted location recovery**: runs Vision text recognition for photos without GPS and scores likely Korean road-name candidates.
+- **Map and timeline review**: presents the reconstructed path through a route map, bottom sheet, and chronological detail view.
+- **EXIF stamp export**: renders camera/device/date/location metadata into shareable image frames with preview and batch export support.
+- **Settings diagnostics**: exposes permission and Info.plist checks so privacy regressions are visible in the app.
+
+## Technical Highlights
+
+- `SwiftUI` app shell with `SwiftData` models for `Route` and `PhotoRecord`.
+- Service-oriented processing for metadata extraction, OCR, route reconstruction, snapshot rendering, and EXIF rendering.
+- `@available(iOS 26.0, *)` guards around FoundationModels usage, keeping the app path usable when AI is unavailable.
+- Tuist project manifest committed as `Project.swift` so a fresh clone can generate the Xcode project reproducibly.
+- Public support/privacy pages and marketing screenshots live in the repository for external review.
 
 ## Quick Start
 
-1. `PhotoRava/PhotoRava/PhotoRava.xcodeproj`를 Xcode에서 엽니다.
-2. `PhotoRava` 스킴을 iPhone Simulator 또는 실기기에서 실행합니다.
-3. 경로 분석/EXIF 저장을 테스트할 때 사진 읽기, 사진 추가 저장, 위치 권한을 허용합니다.
-4. CLI 빌드:
+Prerequisites:
+
+- Xcode with iOS SDK support for the imported frameworks.
+- Tuist 4.x (`tuist version` in this workspace was verified with 4.31.0). `Tuist/Config.swift` is included so worktree checkouts can be detected as Tuist roots.
+
+Generate and open the project:
 
 ```sh
-xcodebuild -project PhotoRava/PhotoRava/PhotoRava.xcodeproj -scheme PhotoRava -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build
+tuist generate
+open PhotoRava.xcworkspace
 ```
+
+Build from the command line:
+
+```sh
+xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoRava-build build
+```
+
+When testing route analysis or EXIF export, allow photo read/write and location permissions.
 
 ## Directory Guide
 
-- `PhotoRava/PhotoRava/PhotoRavaApp.swift`, `AppState.swift`: 앱 진입점과 공용 UI 상태
-- `PhotoRava/PhotoRava/Models`: SwiftData 모델과 EXIF 설정
-- `PhotoRava/PhotoRava/Views`: 기능별 진입 화면과 UI 흐름
-- `PhotoRava/PhotoRava/Services`: 메타데이터 추출, OCR, 경로 복원, 렌더링
-- `PhotoRava/PhotoRava/Derived`: 생성된 plist/에셋 헬퍼. 구조 이해의 주 문서가 아님
-
-## Read Next
-
-- `docs/architecture.md`: 구조와 데이터 흐름
-- `docs/workflows.md`: 실행, 빌드, 수동 검증
-- `AGENTS.md`: Codex/LLM용 읽기 순서와 컨텍스트 규칙
+- `Project.swift`: Tuist manifest for the iOS app target.
+- `Tuist/Config.swift`: minimal Tuist root configuration.
+- `PhotoRava/PhotoRava/PhotoRavaApp.swift`, `AppState.swift`: app entry point and shared UI state.
+- `PhotoRava/PhotoRava/Models`: SwiftData models and EXIF settings.
+- `PhotoRava/PhotoRava/Views`: feature entry points and UI flows.
+- `PhotoRava/PhotoRava/Services`: metadata extraction, OCR, route reconstruction, and image rendering.
+- `marketing-screenshots`: app-store-style screenshots and the local generator script.
+- `docs/architecture.md`: module map and data flow.
+- `docs/workflows.md`: build, verification, and release workflow notes.
+- `docs/reviewer-guide.md`: short code-review path for recruiters and external reviewers.
 
 ## Public Docs
 

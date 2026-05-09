@@ -14,7 +14,13 @@ struct ShotSpec {
     let raisePhone: CGFloat
 }
 
-let outputDirectory = URL(fileURLWithPath: "/Users/sangsoo/Desktop/몰래git/Photoraba/PhotoRava/marketing-screenshots")
+let scriptDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+let inputDirectory = CommandLine.arguments.dropFirst().first
+    .map { URL(fileURLWithPath: $0, isDirectory: true) }
+    ?? scriptDirectory.appendingPathComponent("raw", isDirectory: true)
+let outputDirectory = CommandLine.arguments.dropFirst(2).first
+    .map { URL(fileURLWithPath: $0, isDirectory: true) }
+    ?? scriptDirectory
 let canvasSize = NSSize(width: 1242, height: 2688)
 let phoneWidth: CGFloat = 940
 let phoneHeight = phoneWidth * 2532.0 / 1170.0
@@ -25,7 +31,7 @@ func color(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> NSColo
 
 let specs = [
     ShotSpec(
-        input: "/Users/sangsoo/Desktop/IMG_4793.PNG",
+        input: "01-route-list-source.png",
         output: "01-route-list.png",
         title: "사진으로 정리되는 나의 경로",
         subtitle: "날짜와 사진 수, 이동 기록을 한눈에 확인하세요.",
@@ -37,7 +43,7 @@ let specs = [
         raisePhone: 0
     ),
     ShotSpec(
-        input: "/Users/sangsoo/Desktop/IMG_4787.PNG",
+        input: "02-route-map-source.png",
         output: "02-route-map.png",
         title: "사진이 남긴 길을 지도 위에",
         subtitle: "흩어진 사진을 따라 이동 흐름을 복원합니다.",
@@ -49,7 +55,7 @@ let specs = [
         raisePhone: 0
     ),
     ShotSpec(
-        input: "/Users/sangsoo/Desktop/IMG_4788.PNG",
+        input: "03-timeline-source.png",
         output: "03-timeline.png",
         title: "여정은 타임라인으로 선명하게",
         subtitle: "거리, 시간, 사진 위치를 자연스럽게 이어 보세요.",
@@ -61,7 +67,7 @@ let specs = [
         raisePhone: -20
     ),
     ShotSpec(
-        input: "/Users/sangsoo/Desktop/IMG_4789.PNG",
+        input: "04-exif-frame-source.png",
         output: "04-exif-frame.png",
         title: "촬영 정보를 감각적인 프레임으로",
         subtitle: "기기, 렌즈, 노출값을 사진 아래에 정갈하게 남깁니다.",
@@ -73,7 +79,7 @@ let specs = [
         raisePhone: -10
     ),
     ShotSpec(
-        input: "/Users/sangsoo/Desktop/IMG_4790.PNG",
+        input: "05-exif-theme-source.png",
         output: "05-exif-theme.png",
         title: "원하는 분위기로 바꾸는 EXIF 스탬프",
         subtitle: "프레임과 테마를 고르고 결과를 바로 미리보세요.",
@@ -85,7 +91,7 @@ let specs = [
         raisePhone: -6
     ),
     ShotSpec(
-        input: "/Users/sangsoo/Desktop/IMG_4792.PNG",
+        input: "06-original-preview-source.png",
         output: "06-original-preview.png",
         title: "내보내기 전 원본까지 크게 확인",
         subtitle: "스탬프 결과와 원본 미리보기를 빠르게 오가세요.",
@@ -157,8 +163,9 @@ func drawAccentBand(accent: NSColor, canvas: NSSize) {
 }
 
 func render(_ spec: ShotSpec) throws {
-    guard let screenshot = NSImage(contentsOfFile: spec.input) else {
-        throw NSError(domain: "MarketingScreenshots", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot load \(spec.input)"])
+    let inputURL = inputDirectory.appendingPathComponent(spec.input)
+    guard let screenshot = NSImage(contentsOf: inputURL) else {
+        throw NSError(domain: "MarketingScreenshots", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot load \(inputURL.path)"])
     }
 
     let image = NSImage(size: canvasSize)
@@ -229,6 +236,7 @@ func render(_ spec: ShotSpec) throws {
 }
 
 do {
+    try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     for spec in specs {
         try render(spec)
     }

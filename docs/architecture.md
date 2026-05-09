@@ -3,6 +3,7 @@
 ## 범위
 
 - 앱 타깃: `PhotoRava`
+- 프로젝트 생성: `Project.swift` (Tuist)
 - 소스 루트: `PhotoRava/PhotoRava`
 - 진입점: `PhotoRavaApp.swift`
 - 공용 UI 상태: `AppState.swift`
@@ -35,7 +36,8 @@
 - 의존 방향은 대부분 `Views -> Services -> Models`다.
 - 별도 coordinator/domain 계층은 없고, `AnalysisProgressView.swift`가 서비스를 직접 조합한다.
 - `Route.swift`, `PhotoRecord.swift`는 저장 스키마다. UI 변경처럼 보여도 이 파일 수정은 고위험이다.
-- `Derived/*`는 생성된 프로젝트 보조 코드이며, 제품 구조를 이해하는 1차 문서는 아니다.
+- `PhotoRava/PhotoRava/Derived/InfoPlists`는 앱 Info.plist를 보관한다. `Derived/Sources`의 예전 Tuist 헬퍼는 타깃 소스에서 제외한다.
+- `PhotoRava.xcworkspace`와 `PhotoRava.xcodeproj`는 `tuist generate`로 생성한다.
 - 현재 저장소에는 테스트 타깃, 테스트 플랜, CI, 릴리즈 자동화 스크립트가 없다.
 
 ## 어디부터 볼지
@@ -44,4 +46,4 @@
 - 지도/타임라인 변경: `TimelineDetailView.swift`, `RouteMapView.swift`, `RouteBottomSheet.swift`
 - EXIF 내보내기 변경: `ExifStampRootView.swift`, `ExifStampMetadataService.swift`, `StampedImageRenderer.swift`
 - 권한/공개 문구 변경: `PhotoRava-Info.plist`, `SettingsView.swift`, `privacy-policy.md`, `support.md`
-- 버전/signing/번들/배포 타깃 변경: `PhotoRava.xcodeproj/project.pbxproj`
+- 버전/signing/번들/배포 타깃 변경: `Project.swift`

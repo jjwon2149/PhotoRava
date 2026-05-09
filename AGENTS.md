@@ -3,6 +3,7 @@
 ## 먼저 이해할 것
 
 - 이 저장소는 단일 iOS 타깃이다. 소스 루트는 `PhotoRava/PhotoRava`.
+- Xcode 프로젝트는 `Project.swift`에서 `tuist generate`로 생성한다.
 - 제품 흐름은 `경로 분석`과 `EXIF 스탬프` 두 축이다.
 - 영속 스키마의 중심은 `Models/Route.swift`, `Models/PhotoRecord.swift`.
 - AI 기능은 선택적이다. `FoundationModels` 코드는 `@available(iOS 26.0, *)`로 분기되며 fallback이 있다.
@@ -30,6 +31,7 @@
 - `PhotoRava/PhotoRava/AppState.swift`
 - `PhotoRava/PhotoRava/Models/Route.swift`
 - `PhotoRava/PhotoRava/Models/PhotoRecord.swift`
+- `Project.swift`
 
 ### 필요 시 참고
 
@@ -38,7 +40,7 @@
 - 상세 UI: `PhotoRava/PhotoRava/Views/Timeline/TimelineDetailView.swift`, `PhotoRava/PhotoRava/Views/Map/RouteMapView.swift`, `PhotoRava/PhotoRava/Views/Map/RouteBottomSheet.swift`, `PhotoRava/PhotoRava/Views/Edit/RouteEditView.swift`
 - EXIF 흐름: `PhotoRava/PhotoRava/Views/Exif/ExifStampRootView.swift`, `PhotoRava/PhotoRava/Models/ExifStamp/*`, `PhotoRava/PhotoRava/Services/ExifStampMetadataService.swift`, `PhotoRava/PhotoRava/Services/StampedImageRenderer.swift`
 - 권한/공개 문구: `PhotoRava/PhotoRava/Derived/InfoPlists/PhotoRava-Info.plist`, `PhotoRava/PhotoRava/Views/Home/SettingsView.swift`, `PhotoRava/PhotoRava/privacy-policy.md`, `PhotoRava/PhotoRava/support.md`
-- 프로젝트 설정: `PhotoRava/PhotoRava/PhotoRava.xcodeproj/project.pbxproj`
+- 프로젝트 설정: `Project.swift`
 
 ### 기본 무시
 
@@ -46,7 +48,7 @@
 - `PhotoRava/PhotoRava/.cache/`
 - `PhotoRava/PhotoRava/.claude/`
 - `PhotoRava/PhotoRava/.home/`
-- `PhotoRava/PhotoRava/Derived/Sources/`
+- `PhotoRava/PhotoRava/Derived/Sources/` (타깃 소스에서 제외된 예전 Tuist 헬퍼)
 - `PhotoRava/PhotoRava/Assets.xcassets/AppIcon.appiconset/*.png`
 - `WORKFLOW.md`
 - `PhotoRava/PhotoRava/PhotoRava.xcodeproj/project.pbxproj.bak`
@@ -56,7 +58,7 @@
 - 가장 작은 기능 진입 파일부터 읽고, 필요할 때만 서비스와 모델로 내려간다.
 - `Route.swift`, `PhotoRecord.swift` 변경은 영속 스키마 변경으로 취급한다.
 - 권한이나 정책 문구를 바꾸기 전에는 `PhotoRava-Info.plist`, `SettingsView.swift`, `privacy-policy.md`, `support.md`를 함께 확인한다.
-- 버전, 번들 ID, signing, 배포 타깃, 타깃 멤버십을 바꿀 때만 `project.pbxproj`를 연다.
+- 버전, 번들 ID, signing, 배포 타깃, 타깃 멤버십을 바꿀 때만 `Project.swift`를 연다.
 - `ExifStampRootView.swift`, `OCRService.swift`는 크다. 전체 선읽기 대신 심볼 검색 후 필요한 구간만 연다.
 
 ## 변경 전 체크리스트
