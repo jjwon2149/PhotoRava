@@ -16,6 +16,14 @@ struct RouteListView: View {
     @State private var showingPhotoSelection = false
     @State private var searchText = ""
     @State private var isTransferringAnalysis = false
+
+    private var totalPhotoCount: Int {
+        routes.reduce(0) { $0 + $1.photoCount }
+    }
+
+    private var totalDistance: Double {
+        routes.reduce(0) { $0 + $1.totalDistance }
+    }
     
     // 검색 필터링된 경로
     var filteredRoutes: [Route] {
@@ -55,7 +63,7 @@ struct RouteListView: View {
                     }
                 }
             }
-            .navigationTitle("내 경로")
+            .navigationTitle("PhotoRava")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "경로 이름, 도로명, 날짜로 검색")
             .toolbar {
@@ -63,8 +71,9 @@ struct RouteListView: View {
                     Button {
                         showingPhotoSelection = true
                     } label: {
-                        Image(systemName: "plus")
+                        Image(systemName: "plus.circle.fill")
                     }
+                    .accessibilityLabel("새 경로 만들기")
                 }
             }
             .sheet(isPresented: $showingPhotoSelection) {
@@ -136,38 +145,56 @@ struct RouteListView: View {
     }
     
     private var emptyStateView: some View {
-        VStack(spacing: 24) {
-            ZStack {
-                Circle()
-                    .fill(Color.primary.opacity(0.1))
-                    .frame(width: 100, height: 100)
-                
-                Image(systemName: "map.fill")
-                    .font(.system(size: 50))
-                    .foregroundStyle(.primary)
+        VStack(spacing: 28) {
+            VStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.primaryBlue.opacity(0.24),
+                                    Color.green.opacity(0.18)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 104, height: 104)
+
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundStyle(Color.primaryBlue)
+                }
+
+                VStack(spacing: 10) {
+                    Text("사진으로 여정을 복원하세요")
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    Text("GPS와 촬영 시간을 분석해 이동 경로를 만들고, AI 요약과 EXIF 스탬프까지 한 번에 정리합니다.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                        .padding(.horizontal, 16)
+                }
             }
-            
-            VStack(spacing: 8) {
-                Text("첫 경로를 만들어보세요")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                Text("사진에서 위치 정보를 추출하여\n당신만의 특별한 여정을 자동으로 생성합니다.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
+
+            HStack(spacing: 8) {
+                EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
+                EmptyFeatureBadge(title: "EXIF 스탬프", systemImage: "text.below.photo")
             }
-            
+
             Button {
                 showingPhotoSelection = true
             } label: {
-                Text("시작하기")
+                Label("사진 선택하기", systemImage: "photo.on.rectangle.angled")
                     .font(.headline)
                     .foregroundStyle(.white)
-                    .frame(width: 200, height: 50)
-                    .background(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .frame(maxWidth: 260, minHeight: 52)
+                    .background(Color.primaryBlue)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
         .padding()
@@ -176,6 +203,17 @@ struct RouteListView: View {
     
     private var routeListView: some View {
         List {
+            if searchText.isEmpty {
+                RouteOverviewHeader(
+                    routeCount: routes.count,
+                    photoCount: totalPhotoCount,
+                    distance: totalDistance
+                )
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+
             ForEach(filteredRoutes) { route in
                 ZStack {
                     RouteCardView(route: route)
@@ -236,26 +274,14 @@ struct RouteCardView: View {
     let route: Route
     
     var body: some View {
-        HStack(spacing: 16) {
-            // Map Thumbnail
+        HStack(alignment: .top, spacing: 14) {
             RouteMapThumbnail(route: route)
-                .frame(width: 96, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(width: 104, height: 116)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             
-            VStack(alignment: .leading, spacing: 8) {
-                // Photo count badge
-                HStack(spacing: 4) {
-                    Image(systemName: "photo")
-                        .font(.caption2)
-                    Text("\(route.photoCount) PHOTOS")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                }
-                .foregroundStyle(.primary)
-                
-                // Route name
+            VStack(alignment: .leading, spacing: 9) {
                 Text(route.name)
-                    .font(.body)
+                    .font(.headline)
                     .fontWeight(.bold)
                     .lineLimit(1)
 
@@ -266,11 +292,15 @@ struct RouteCardView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
-                
-                // Date
-                Text(route.date.formatted(date: .abbreviated, time: .omitted))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    RouteMetaPill(title: "\(route.photoCount)", systemImage: "photo")
+                    RouteMetaPill(title: formattedDistance, systemImage: "arrow.triangle.turn.up.right.circle")
+
+                    if route.duration > 0 {
+                        RouteMetaPill(title: formattedDuration, systemImage: "clock")
+                    }
+                }
 
                 if !route.aiSummaryHighlights.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -280,20 +310,149 @@ struct RouteCardView: View {
                                     .font(.system(size: 10, weight: .medium))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(Color.primaryBlue.opacity(0.08))
+                                    .background(Color.primaryBlue.opacity(0.10))
                                     .foregroundStyle(Color.primaryBlue)
                                     .clipShape(Capsule())
                             }
                         }
                     }
                 }
+
+                Text(route.date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 10, x: 0, y: 5)
+    }
+
+    private var formattedDistance: String {
+        guard route.totalDistance > 0 else { return "0km" }
+        return String(format: "%.1fkm", route.totalDistance)
+    }
+
+    private var formattedDuration: String {
+        let minutes = max(Int(route.duration / 60), 1)
+        if minutes >= 60 {
+            return "\(minutes / 60)h \(minutes % 60)m"
+        }
+        return "\(minutes)m"
+    }
+}
+
+private struct RouteOverviewHeader: View {
+    let routeCount: Int
+    let photoCount: Int
+    let distance: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("사진 속 이동을 지도와 기록으로")
+                        .font(.headline)
+                        .fontWeight(.bold)
+
+                    Text("저장된 여정을 빠르게 훑고, 새 사진으로 다음 경로를 분석하세요.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "sparkles")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.primaryBlue)
+                    .padding(10)
+                    .background(Color.primaryBlue.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            HStack(spacing: 10) {
+                RouteStatTile(value: "\(routeCount)", label: "경로")
+                RouteStatTile(value: "\(photoCount)", label: "사진")
+                RouteStatTile(value: String(format: "%.1fkm", distance), label: "거리")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.systemBackground),
+                    Color.primaryBlue.opacity(0.08)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+}
+
+private struct RouteStatTile: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct RouteMetaPill: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .labelStyle(.titleAndIcon)
+    }
+}
+
+private struct EmptyFeatureBadge: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(Capsule())
     }
 }
 

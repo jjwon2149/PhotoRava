@@ -51,7 +51,7 @@
 - `PhotoRava/PhotoRava/Derived/Sources/` (타깃 소스에서 제외된 예전 Tuist 헬퍼)
 - `PhotoRava/PhotoRava/Assets.xcassets/AppIcon.appiconset/*.png`
 - `WORKFLOW.md`
-- `PhotoRava/PhotoRava/PhotoRava.xcodeproj/project.pbxproj.bak`
+- 생성된 `PhotoRava.xcodeproj/`
 
 ## 수정 우선순위
 

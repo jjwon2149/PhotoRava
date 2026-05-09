@@ -30,7 +30,7 @@ struct MainTabView: View {
         TabView(selection: $appState.selectedTab) {
             RouteListView()
                 .tabItem {
-                    Label("Home", systemImage: "house.fill")
+                    Label("경로", systemImage: "map.fill")
                 }
                 .tag(AppState.Tab.home)
             
@@ -42,7 +42,7 @@ struct MainTabView: View {
             
             SettingsView()
                 .tabItem {
-                    Label("Settings", systemImage: "gearshape")
+                    Label("설정", systemImage: "gearshape")
                 }
                 .tag(AppState.Tab.settings)
         }

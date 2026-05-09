@@ -140,3 +140,8 @@ xcuserdata
 **/xcshareddata/WorkspaceSettings.xcsettings
 
 # End of https://www.toptal.com/developers/gitignore/api/xcode,macos,swiftpackagemanager,swift
+
+# Tuist generated project files
+/Derived/
+/PhotoRava.xcodeproj/
+/PhotoRava.xcworkspace/

@@ -5,6 +5,7 @@
 - 앱 타깃: `PhotoRava`
 - 프로젝트 생성: `Project.swift` (Tuist)
 - 소스 루트: `PhotoRava/PhotoRava`
+- 프로젝트 정의: `Project.swift` (Tuist)
 - 진입점: `PhotoRavaApp.swift`
 - 공용 UI 상태: `AppState.swift`
 - 핵심 영속 모델: `Models/Route.swift`, `Models/PhotoRecord.swift`
@@ -13,6 +14,7 @@
 
 | 영역 | 주요 파일 | 역할 |
 | --- | --- | --- |
+| 프로젝트 | `Project.swift` | Tuist 기반 Xcode 프로젝트 생성, iOS 앱 타깃 설정 |
 | 앱 셸 | `PhotoRavaApp.swift`, `AppState.swift` | 앱 시작, SwiftData 마운트, 탭 전환, 분석 대기 사진 전달 |
 | 경로 유입 | `Views/Home/RouteListView.swift`, `Views/PhotoPicker/PhotoSelectionView.swift`, `Views/Analysis/AnalysisProgressView.swift` | 사진 선택 시작, 분석 실행, 결과 저장 |
 | 경로 처리 | `Services/PhotoMetadataService.swift`, `Services/OCRService.swift`, `Services/RouteReconstructionService.swift` | 메타데이터 추출, OCR, 지오코딩, 통계 계산, 경로 파생 데이터 저장 |

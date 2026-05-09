@@ -17,13 +17,15 @@ open PhotoRava.xcworkspace
 Check the generated workspace and schemes:
 
 ```sh
+tuist generate
 xcodebuild -list -workspace PhotoRava.xcworkspace
 ```
 
 Build for the iOS Simulator:
 
 ```sh
-xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoRava-build build
+tuist generate
+xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoRava-build CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## Manual Verification
@@ -61,6 +63,7 @@ swift marketing-screenshots/generate_marketing_screenshots.swift [input-director
 - Release archive:
 
 ```sh
+tuist generate
 xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -configuration Release -destination 'generic/platform=iOS' archive -archivePath /tmp/PhotoRava.xcarchive
 ```
 

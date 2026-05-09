@@ -2,6 +2,7 @@ import ProjectDescription
 
 let project = Project(
     name: "PhotoRava",
+    organizationName: "PhotoRava",
     targets: [
         .target(
             name: "PhotoRava",
@@ -14,18 +15,24 @@ let project = Project(
                 .glob(
                     "PhotoRava/PhotoRava/**/*.swift",
                     excluding: ["PhotoRava/PhotoRava/Derived/Sources/**"]
-                ),
+                )
             ],
-            resources: ["PhotoRava/PhotoRava/Assets.xcassets"],
+            resources: [
+                "PhotoRava/PhotoRava/Assets.xcassets"
+            ],
             dependencies: [],
             settings: .settings(
                 base: [
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
                     "CURRENT_PROJECT_VERSION": "1",
+                    "DEVELOPMENT_TEAM": "",
+                    "GENERATE_INFOPLIST_FILE": "NO",
                     "MARKETING_VERSION": "1.0.0",
+                    "PRODUCT_NAME": "PhotoRava",
                     "SWIFT_VERSION": "5.0",
+                    "TARGETED_DEVICE_FAMILY": "1"
                 ]
             )
-        ),
+        )
     ]
 )

@@ -2,6 +2,12 @@
 
 PhotoRava is a SwiftUI iOS app that turns photo metadata into a travel route and exports clean EXIF-stamped images. It is built as a single app target with SwiftData persistence, Photos/Vision metadata extraction, MapKit route visualization, and optional on-device AI fallback paths for devices that support FoundationModels.
 
+![Swift](https://img.shields.io/badge/Swift-5-F05138?style=flat-square&logo=swift&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-17%2B-111111?style=flat-square&logo=apple&logoColor=white)
+![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-0A84FF?style=flat-square)
+![SwiftData](https://img.shields.io/badge/Persistence-SwiftData-34C759?style=flat-square)
+![Tuist](https://img.shields.io/badge/Project-Tuist-6E56CF?style=flat-square)
+
 ## Product Snapshot
 
 | Route Library | Route Map | Timeline |
@@ -40,7 +46,8 @@ PhotoRava is a SwiftUI iOS app that turns photo metadata into a travel route and
 Prerequisites:
 
 - Xcode with iOS SDK support for the imported frameworks.
-- Tuist 4.x (`tuist version` in this workspace was verified with 4.31.0). `Tuist/Config.swift` is included so worktree checkouts can be detected as Tuist roots.
+- Tuist 4.x (`tuist version` in this workspace was verified with 4.31.0).
+- `Tuist/Config.swift` is included so worktree checkouts can be detected as Tuist roots.
 
 Generate and open the project:
 
@@ -52,7 +59,14 @@ open PhotoRava.xcworkspace
 Build from the command line:
 
 ```sh
-xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoRava-build build
+tuist generate
+xcodebuild -workspace PhotoRava.xcworkspace \
+  -scheme PhotoRava \
+  -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/PhotoRava-build \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 ```
 
 When testing route analysis or EXIF export, allow photo read/write and location permissions.
@@ -72,5 +86,5 @@ When testing route analysis or EXIF export, allow photo read/write and location 
 
 ## Public Docs
 
-- `PhotoRava/PhotoRava/privacy-policy.md`
-- `PhotoRava/PhotoRava/support.md`
+- [Privacy Policy](PhotoRava/PhotoRava/privacy-policy.md)
+- [Support](PhotoRava/PhotoRava/support.md)
