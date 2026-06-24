@@ -151,40 +151,44 @@ struct RouteListView: View {
     
     private var emptyStateView: some View {
         centeredScrollableState {
-            VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 20 : 28) {
+            VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 10 : 28) {
                 VStack(spacing: 16) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 24)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.primaryBlue.opacity(0.24),
-                                        Color.green.opacity(0.18)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 24)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.primaryBlue.opacity(0.24),
+                                            Color.green.opacity(0.18)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
                                 )
-                            )
-                            .frame(width: emptyStateIconSize, height: emptyStateIconSize)
+                                .frame(width: emptyStateIconSize, height: emptyStateIconSize)
 
-                        Image(systemName: "map.fill")
-                            .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 36 : 44, weight: .semibold))
-                            .foregroundStyle(Color.primaryBlue)
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 44, weight: .semibold))
+                                .foregroundStyle(Color.primaryBlue)
+                        }
                     }
 
                     VStack(spacing: 10) {
                         Text("사진으로 여정을 복원하세요")
-                            .font(.title2)
+                            .font(dynamicTypeSize.isAccessibilitySize ? .title3 : .title2)
                             .fontWeight(.bold)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        Text("GPS와 촬영 시간을 분석해 이동 경로를 만들고, AI 요약과 EXIF 스탬프까지 한 번에 정리합니다.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Text("GPS와 촬영 시간을 분석해 이동 경로를 만들고, AI 요약과 EXIF 스탬프까지 한 번에 정리합니다.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
 
@@ -193,18 +197,26 @@ struct RouteListView: View {
                 Button {
                     showingPhotoSelection = true
                 } label: {
-                    Label {
-                        Text("사진 선택하기")
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.85)
-                    } icon: {
-                        Image(systemName: "photo.on.rectangle.angled")
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Text("사진 선택하기")
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.85)
+                        } else {
+                            Label {
+                                Text("사진 선택하기")
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.85)
+                            } icon: {
+                                Image(systemName: "photo.on.rectangle.angled")
+                            }
+                        }
                     }
                     .font(.headline)
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
+                    .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 14 : 18)
+                    .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 6 : 14)
                     .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 260, minHeight: 52)
                     .background(Color.primaryBlue)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -285,18 +297,12 @@ struct RouteListView: View {
     }
 
     private var emptyStateIconSize: CGFloat {
-        dynamicTypeSize.isAccessibilitySize ? 84 : 104
+        dynamicTypeSize.isAccessibilitySize ? 72 : 104
     }
 
     @ViewBuilder
     private var emptyStateFeatureBadges: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: 8) {
-                EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
-                EmptyFeatureBadge(title: "EXIF 스탬프", systemImage: "text.below.photo")
-            }
-        } else {
+        if !dynamicTypeSize.isAccessibilitySize {
             HStack(spacing: 8) {
                 EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                 EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
@@ -313,9 +319,13 @@ struct RouteListView: View {
                 content()
                     .frame(maxWidth: 420)
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: proxy.size.height, alignment: .center)
+                    .frame(
+                        minHeight: proxy.size.height,
+                        alignment: dynamicTypeSize.isAccessibilitySize ? .top : .center
+                    )
                     .padding(.horizontal, 20)
-                    .padding(.vertical, 24)
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 36 : 24)
+                    .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 140 : 24)
             }
             .scrollIndicators(.hidden)
             .safeAreaPadding(.bottom, 16)
