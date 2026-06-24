@@ -19,7 +19,9 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<string>$(ADMOB_APPLICATION_IDENTIFIER)</string>
+	<key>PhotoRavaRouteListBannerAdUnitIdentifier</key>
+	<string>$(ADMOB_ROUTE_LIST_BANNER_AD_UNIT_IDENTIFIER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>

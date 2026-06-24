@@ -60,6 +60,7 @@ swift marketing-screenshots/generate_marketing_screenshots.swift [input-director
 - Deployment target: iOS 17.0.
 - The generated project uses Swift 5 language mode. Current Swift 6 migration warnings are visible during builds.
 - Some AI code paths require iOS 26.0+ and supported devices, but guarded fallbacks keep the app usable elsewhere.
+- AdMob defaults to Google's official demo IDs through build settings. For production builds, override `ADMOB_APPLICATION_IDENTIFIER` and `ADMOB_ROUTE_LIST_BANNER_AD_UNIT_IDENTIFIER` privately in the release environment; do not commit real production values.
 - Release archive:
 
 ```sh

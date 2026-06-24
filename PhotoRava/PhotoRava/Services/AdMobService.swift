@@ -9,16 +9,30 @@ import Foundation
 import GoogleMobileAds
 
 enum AdMobConfiguration {
-    // Official Google demo IDs only. Production AdMob values are PHO-114-gated.
-    static let testApplicationIdentifier = "ca-app-pub-3940256099942544~1458002511"
-    static let routeListTestBannerAdUnitIdentifier = "ca-app-pub-3940256099942544/2435281174"
+    static var isConfigured: Bool {
+        configuredApplicationIdentifier != nil && routeListBannerAdUnitIdentifier != nil
+    }
 
-    static var isTestApplicationConfigured: Bool {
-        configuredApplicationIdentifier == testApplicationIdentifier
+    static var routeListBannerAdUnitIdentifier: String? {
+        cleanedBundleString(for: "PhotoRavaRouteListBannerAdUnitIdentifier")
     }
 
     private static var configuredApplicationIdentifier: String? {
-        Bundle.main.object(forInfoDictionaryKey: "GADApplicationIdentifier") as? String
+        cleanedBundleString(for: "GADApplicationIdentifier")
+    }
+
+    private static func cleanedBundleString(for key: String) -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String else {
+            return nil
+        }
+
+        let cleanedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedValue.isEmpty,
+              !cleanedValue.hasPrefix("$(") else {
+            return nil
+        }
+
+        return cleanedValue
     }
 }
 
@@ -30,7 +44,7 @@ final class AdMobService {
     private init() {}
 
     func startIfConfigured() {
-        guard !didStart, AdMobConfiguration.isTestApplicationConfigured else { return }
+        guard !didStart, AdMobConfiguration.isConfigured else { return }
 
         MobileAds.shared.start()
         didStart = true

@@ -13,9 +13,9 @@ struct RouteListAdBannerView: View {
     @State private var loadState: AdMobBannerLoadState = .loading
 
     var body: some View {
-        if AdMobConfiguration.isTestApplicationConfigured {
+        if let adUnitID = AdMobConfiguration.routeListBannerAdUnitIdentifier {
             AdMobBannerContainer(
-                adUnitID: AdMobConfiguration.routeListTestBannerAdUnitIdentifier,
+                adUnitID: adUnitID,
                 loadState: $loadState
             )
             .frame(maxWidth: .infinity)

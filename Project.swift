@@ -38,7 +38,10 @@ let project = Project(
                     "MARKETING_VERSION": "1.0.0",
                     "PRODUCT_NAME": "PhotoRava",
                     "SWIFT_VERSION": "5.0",
-                    "TARGETED_DEVICE_FAMILY": "1"
+                    "TARGETED_DEVICE_FAMILY": "1",
+                    // Official Google demo IDs. Override these build settings privately for release builds.
+                    "ADMOB_APPLICATION_IDENTIFIER": "ca-app-pub-3940256099942544~1458002511",
+                    "ADMOB_ROUTE_LIST_BANNER_AD_UNIT_IDENTIFIER": "ca-app-pub-3940256099942544/2435281174"
                 ]
             )
         )
