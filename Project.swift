@@ -14,7 +14,7 @@ let project = Project(
             name: "PhotoRava",
             destinations: .iOS,
             product: .app,
-            bundleId: "com.jjwon2149.PhotoRava",
+            bundleId: "com.mabataki.smithwrld999.PhotoRava",
             deploymentTargets: .iOS("17.0"),
             infoPlist: .file(path: "PhotoRava/PhotoRava/Derived/InfoPlists/PhotoRava-Info.plist"),
             sources: [
