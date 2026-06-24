@@ -63,6 +63,10 @@ struct RouteListView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                RouteListAdBannerView()
+                    .background(Color(.systemGroupedBackground))
+            }
             .navigationTitle("PhotoRava")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "경로 이름, 도로명, 날짜로 검색")

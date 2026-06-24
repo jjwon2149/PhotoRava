@@ -5,7 +5,7 @@
 - The Xcode project is generated from `Project.swift` with Tuist.
 - Verified Tuist version in this workspace: 4.31.0.
 - `Tuist/Config.swift` is intentionally committed so Tuist can locate the project root in worktree checkouts.
-- There are no third-party package dependencies.
+- Google Mobile Ads SDK is resolved through Tuist's Swift Package Manager integration and is currently test-banner-only.
 
 ```sh
 tuist generate

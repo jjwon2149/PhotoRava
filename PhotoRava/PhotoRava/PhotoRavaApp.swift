@@ -10,6 +10,10 @@ import SwiftData
 
 @main
 struct PhotoRavaApp: App {
+    init() {
+        AdMobService.shared.startIfConfigured()
+    }
+
     var body: some Scene {
         WindowGroup {
             MainTabView()

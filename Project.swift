@@ -3,6 +3,12 @@ import ProjectDescription
 let project = Project(
     name: "PhotoRava",
     organizationName: "PhotoRava",
+    packages: [
+        .remote(
+            url: "https://github.com/googleads/swift-package-manager-google-mobile-ads.git",
+            requirement: .upToNextMajor(from: "13.5.0")
+        )
+    ],
     targets: [
         .target(
             name: "PhotoRava",
@@ -20,7 +26,9 @@ let project = Project(
             resources: [
                 "PhotoRava/PhotoRava/Assets.xcassets"
             ],
-            dependencies: [],
+            dependencies: [
+                .package(product: "GoogleMobileAds")
+            ],
             settings: .settings(
                 base: [
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
