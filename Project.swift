@@ -32,10 +32,10 @@ let project = Project(
             settings: .settings(
                 base: [
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
-                    "CURRENT_PROJECT_VERSION": "1",
+                    "CURRENT_PROJECT_VERSION": "6",
                     "DEVELOPMENT_TEAM": "",
                     "GENERATE_INFOPLIST_FILE": "NO",
-                    "MARKETING_VERSION": "1.0.0",
+                    "MARKETING_VERSION": "1.0.2",
                     "PRODUCT_NAME": "PhotoRava",
                     "SWIFT_VERSION": "5.0",
                     "TARGETED_DEVICE_FAMILY": "1",
