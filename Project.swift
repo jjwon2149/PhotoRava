@@ -32,7 +32,7 @@ let project = Project(
             settings: .settings(
                 base: [
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
-                    "CURRENT_PROJECT_VERSION": "6",
+                    "CURRENT_PROJECT_VERSION": "7",
                     "DEVELOPMENT_TEAM": "",
                     "GENERATE_INFOPLIST_FILE": "NO",
                     "MARKETING_VERSION": "1.0.2",
