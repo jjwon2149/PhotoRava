@@ -11,6 +11,7 @@ import MapKit
 
 struct RouteListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var appState = AppState.shared
     @Query(sort: \Route.date, order: .reverse) private var routes: [Route]
     @State private var showingPhotoSelection = false
@@ -149,60 +150,67 @@ struct RouteListView: View {
     }
     
     private var emptyStateView: some View {
-        VStack(spacing: 28) {
-            VStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 28)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.primaryBlue.opacity(0.24),
-                                    Color.green.opacity(0.18)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+        centeredScrollableState {
+            VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 20 : 28) {
+                VStack(spacing: 16) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.primaryBlue.opacity(0.24),
+                                        Color.green.opacity(0.18)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .frame(width: 104, height: 104)
+                            .frame(width: emptyStateIconSize, height: emptyStateIconSize)
 
-                    Image(systemName: "map.fill")
-                        .font(.system(size: 44, weight: .semibold))
-                        .foregroundStyle(Color.primaryBlue)
+                        Image(systemName: "map.fill")
+                            .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 36 : 44, weight: .semibold))
+                            .foregroundStyle(Color.primaryBlue)
+                    }
+
+                    VStack(spacing: 10) {
+                        Text("사진으로 여정을 복원하세요")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("GPS와 촬영 시간을 분석해 이동 경로를 만들고, AI 요약과 EXIF 스탬프까지 한 번에 정리합니다.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
-                VStack(spacing: 10) {
-                    Text("사진으로 여정을 복원하세요")
-                        .font(.title2)
-                        .fontWeight(.bold)
+                emptyStateFeatureBadges
 
-                    Text("GPS와 촬영 시간을 분석해 이동 경로를 만들고, AI 요약과 EXIF 스탬프까지 한 번에 정리합니다.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(4)
-                        .padding(.horizontal, 16)
-                }
-            }
-
-            HStack(spacing: 8) {
-                EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
-                EmptyFeatureBadge(title: "EXIF 스탬프", systemImage: "text.below.photo")
-            }
-
-            Button {
-                showingPhotoSelection = true
-            } label: {
-                Label("사진 선택하기", systemImage: "photo.on.rectangle.angled")
+                Button {
+                    showingPhotoSelection = true
+                } label: {
+                    Label {
+                        Text("사진 선택하기")
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                    } icon: {
+                        Image(systemName: "photo.on.rectangle.angled")
+                    }
                     .font(.headline)
                     .foregroundStyle(.white)
-                    .frame(maxWidth: 260, minHeight: 52)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 260, minHeight: 52)
                     .background(Color.primaryBlue)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var routeListView: some View {
@@ -240,30 +248,33 @@ struct RouteListView: View {
     }
     
     private var searchEmptyStateView: some View {
-        VStack(spacing: 24) {
-            ZStack {
-                Circle()
-                    .fill(Color.primary.opacity(0.1))
-                    .frame(width: 100, height: 100)
-                
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.primary)
-            }
-            
-            VStack(spacing: 8) {
-                Text("검색 결과 없음")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                
-                Text("'\(searchText)'에 대한 결과를 찾을 수 없습니다")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+        centeredScrollableState {
+            VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 18 : 24) {
+                ZStack {
+                    Circle()
+                        .fill(Color.primary.opacity(0.1))
+                        .frame(width: emptyStateIconSize, height: emptyStateIconSize)
+
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 34 : 40))
+                        .foregroundStyle(.primary)
+                }
+
+                VStack(spacing: 8) {
+                    Text("검색 결과 없음")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("'\(searchText)'에 대한 결과를 찾을 수 없습니다")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
     }
     
     private func deleteRoutes(at offsets: IndexSet) {
@@ -271,6 +282,44 @@ struct RouteListView: View {
             modelContext.delete(filteredRoutes[index])
         }
         try? modelContext.save()
+    }
+
+    private var emptyStateIconSize: CGFloat {
+        dynamicTypeSize.isAccessibilitySize ? 84 : 104
+    }
+
+    @ViewBuilder
+    private var emptyStateFeatureBadges: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 8) {
+                EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
+                EmptyFeatureBadge(title: "EXIF 스탬프", systemImage: "text.below.photo")
+            }
+        } else {
+            HStack(spacing: 8) {
+                EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
+                EmptyFeatureBadge(title: "EXIF 스탬프", systemImage: "text.below.photo")
+            }
+        }
+    }
+
+    private func centeredScrollableState<Content: View>(
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        GeometryReader { proxy in
+            ScrollView {
+                content()
+                    .frame(maxWidth: 420)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: proxy.size.height, alignment: .center)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
+            }
+            .scrollIndicators(.hidden)
+            .safeAreaPadding(.bottom, 16)
+        }
     }
 }
 
@@ -449,12 +498,20 @@ private struct EmptyFeatureBadge: View {
     let systemImage: String
 
     var body: some View {
-        Label(title, systemImage: systemImage)
+        Label {
+            Text(title)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+        } icon: {
+            Image(systemName: systemImage)
+        }
             .font(.caption)
             .fontWeight(.semibold)
             .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
             .background(Color(.secondarySystemGroupedBackground))
             .clipShape(Capsule())
     }
