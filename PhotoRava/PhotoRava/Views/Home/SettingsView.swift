@@ -23,7 +23,7 @@ struct SettingsView: View {
                 Section("권한") {
                     PermissionRow(
                         title: "사진 라이브러리",
-                        description: "경로 복원을 위해 사진에 접근합니다",
+                        description: "선택한 사진의 촬영 시간과 위치를 읽어 경로 지도, 타임라인, EXIF 결과를 만듭니다.",
                         status: photoLibraryStatus,
                         onTap: {
                             handlePhotoPermissionTap()
@@ -40,11 +40,15 @@ struct SettingsView: View {
                 
                 Section("진단") {
                     DiagnosticsRow(
-                        title: "NSPhotoLibraryUsageDescription",
+                        title: "사진 권한 안내 문구",
+                        detail: "iOS가 사진 접근 이유를 보여줄 준비가 되어 있는지 확인합니다.",
+                        technicalName: "NSPhotoLibraryUsageDescription",
                         isOK: hasInfoPlistKey("NSPhotoLibraryUsageDescription")
                     )
                     DiagnosticsRow(
-                        title: "NSLocationWhenInUseUsageDescription",
+                        title: "위치 권한 안내 문구",
+                        detail: "iOS가 위치 접근 이유를 보여줄 준비가 되어 있는지 확인합니다.",
+                        technicalName: "NSLocationWhenInUseUsageDescription",
                         isOK: hasInfoPlistKey("NSLocationWhenInUseUsageDescription")
                     )
                 }
@@ -151,7 +155,7 @@ struct PermissionRow: View {
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(title)
                         .font(.body)
@@ -164,20 +168,29 @@ struct PermissionRow: View {
                 Text(description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Text(statusMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.plain)
+        .accessibilityHint(statusMessage)
     }
     
     private var statusBadge: some View {
         Group {
             switch status {
-            case .authorized, .limited:
+            case .authorized:
                 Label("허용됨", systemImage: "checkmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.green)
+            case .limited:
+                Label("일부 허용", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             case .denied, .restricted:
-                Label("거부됨", systemImage: "xmark.circle.fill")
+                Label("설정 필요", systemImage: "xmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
             case .notDetermined:
@@ -189,6 +202,21 @@ struct PermissionRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var statusMessage: String {
+        switch status {
+        case .authorized:
+            return "사진 분석과 결과 저장에 필요한 접근이 허용되어 있습니다."
+        case .limited:
+            return "일부 사진만 허용되어 있습니다. 더 많은 사진을 분석하려면 탭해 접근 범위를 조정하세요."
+        case .denied, .restricted:
+            return "탭하면 iOS 설정에서 사진 접근을 다시 허용할 수 있습니다."
+        case .notDetermined:
+            return "탭하면 iOS 권한 요청이 열립니다."
+        @unknown default:
+            return "권한 상태를 확인할 수 없습니다. 탭해 iOS 설정을 확인하세요."
         }
     }
 }
@@ -199,7 +227,7 @@ struct LocationPermissionRow: View {
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("위치 정보")
                         .font(.body)
@@ -209,12 +237,17 @@ struct LocationPermissionRow: View {
                     locationStatusBadge
                 }
                 
-                Text("현재 위치를 지도에 표시하기 위해 필요합니다")
+                Text("지도에서 내 위치를 확인할 때 사용합니다. 경로는 선택한 사진의 위치 정보로 만듭니다.")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(locationStatusMessage)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.plain)
+        .accessibilityHint(locationStatusMessage)
     }
     
     private var locationStatusBadge: some View {
@@ -225,7 +258,7 @@ struct LocationPermissionRow: View {
                     .font(.caption)
                     .foregroundStyle(.green)
             case .denied, .restricted:
-                Label("거부됨", systemImage: "xmark.circle.fill")
+                Label("설정 필요", systemImage: "xmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
             case .notDetermined:
@@ -237,6 +270,19 @@ struct LocationPermissionRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var locationStatusMessage: String {
+        switch locationManager.status {
+        case .authorizedWhenInUse, .authorizedAlways:
+            return "지도에서 현재 위치를 표시할 수 있습니다."
+        case .denied, .restricted:
+            return "탭하면 iOS 설정에서 위치 접근을 다시 허용할 수 있습니다."
+        case .notDetermined:
+            return "탭하면 iOS 권한 요청이 열립니다."
+        @unknown default:
+            return "권한 상태를 확인할 수 없습니다. 탭해 iOS 설정을 확인하세요."
         }
     }
 }
@@ -268,16 +314,31 @@ class LocationPermissionManager: NSObject, ObservableObject, CLLocationManagerDe
 
 struct DiagnosticsRow: View {
     let title: String
+    let detail: String
+    let technicalName: String
     let isOK: Bool
     
     var body: some View {
-        HStack {
-            Text(title)
-                .font(.subheadline)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(technicalName)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
             Spacer()
-            Label(isOK ? "OK" : "Missing", systemImage: isOK ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+
+            Label(isOK ? "준비됨" : "확인 필요", systemImage: isOK ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(isOK ? .green : .orange)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }

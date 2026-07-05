@@ -71,11 +71,16 @@ struct PhotoSelectionView: View {
             Image(systemName: "photo.on.rectangle.angled")
                 .font(.system(size: 60))
                 .foregroundStyle(.secondary)
-            
-            Text("사진을 선택해주세요")
+
+            Text("처음이라면 5~20장을 골라보세요")
                 .font(.headline)
+
+            Text("GPS가 있는 사진이 가장 정확해요. 위치 정보가 없는 사진도 표지판이나 영수증 글자를 읽어 경로 단서를 찾을 수 있습니다.")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-            
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
             PhotosPicker(
                 selection: $viewModel.selectedItems,
                 maxSelectionCount: 50,
@@ -94,17 +99,34 @@ struct PhotoSelectionView: View {
     
     private var photoGridView: some View {
         ScrollView {
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 2),
-                GridItem(.flexible(), spacing: 2),
-                GridItem(.flexible(), spacing: 2)
-            ], spacing: 2) {
-                ForEach(viewModel.loadedPhotos) { photo in
-                    PhotoGridCell(
-                        photo: photo,
-                        isSelected: viewModel.isSelected(photo)
-                    ) {
-                        viewModel.toggleSelection(photo)
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(viewModel.selectedCount)장 선택됨")
+                        .font(.headline)
+
+                    Text(viewModel.selectedCount == 0 ? "분석할 사진을 탭해 선택하세요. 5~20장부터 시작하면 여행 흐름을 보기 좋아요." : "선택한 사진으로 지도 경로와 타임라인을 만듭니다. GPS 사진이 많을수록 더 정확해요.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Text("GPS가 없는 사진은 OCR/fallback으로 위치 단서를 찾습니다.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+
+                LazyVGrid(columns: [
+                    GridItem(.flexible(), spacing: 2),
+                    GridItem(.flexible(), spacing: 2),
+                    GridItem(.flexible(), spacing: 2)
+                ], spacing: 2) {
+                    ForEach(viewModel.loadedPhotos) { photo in
+                        PhotoGridCell(
+                            photo: photo,
+                            isSelected: viewModel.isSelected(photo)
+                        ) {
+                            viewModel.toggleSelection(photo)
+                        }
                     }
                 }
             }
@@ -115,7 +137,7 @@ struct PhotoSelectionView: View {
     private var analyzeButton: some View {
         VStack(spacing: 0) {
             Divider()
-            
+
             Button {
                 viewModel.startAnalysis()
             } label: {
@@ -128,7 +150,15 @@ struct PhotoSelectionView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .disabled(!viewModel.canAnalyze)
-            .padding()
+            .padding(.horizontal)
+            .padding(.top)
+
+            Text(viewModel.canAnalyze ? "선택한 사진 \(viewModel.selectedCount)장으로 분석을 시작합니다." : "분석하려면 사진을 1장 이상 선택해야 해요.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+                .padding(.bottom, 12)
         }
         .background(.ultraThinMaterial)
     }

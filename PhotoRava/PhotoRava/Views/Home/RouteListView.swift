@@ -175,20 +175,18 @@ struct RouteListView: View {
                     }
 
                     VStack(spacing: 10) {
-                        Text("사진으로 여정을 복원하세요")
+                        Text("여행 사진을 지도 경로로 바꾸세요")
                             .font(dynamicTypeSize.isAccessibilitySize ? .title3 : .title2)
                             .fontWeight(.bold)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        if !dynamicTypeSize.isAccessibilitySize {
-                            Text("GPS와 촬영 시간을 분석해 이동 경로를 만들고, AI 요약과 EXIF 스탬프까지 한 번에 정리합니다.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .lineSpacing(4)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text("사진이 경로 지도, 타임라인, 공유용 EXIF 이미지로 정리됩니다.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -199,12 +197,12 @@ struct RouteListView: View {
                 } label: {
                     Group {
                         if dynamicTypeSize.isAccessibilitySize {
-                            Text("사진 선택하기")
+                            Text("사진으로 경로 만들기")
                                 .lineLimit(2)
                                 .minimumScaleFactor(0.85)
                         } else {
                             Label {
-                                Text("사진 선택하기")
+                                Text("사진으로 경로 만들기")
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.85)
                             } icon: {
@@ -285,6 +283,29 @@ struct RouteListView: View {
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                VStack(spacing: 10) {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Label("검색어 지우기", systemImage: "xmark.circle")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.primaryBlue)
+
+                    Button {
+                        showingPhotoSelection = true
+                    } label: {
+                        Label("새 사진으로 경로 만들기", systemImage: "photo.on.rectangle.angled")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.primaryBlue)
+                }
+                .frame(maxWidth: 280)
             }
         }
     }
@@ -304,9 +325,9 @@ struct RouteListView: View {
     private var emptyStateFeatureBadges: some View {
         if !dynamicTypeSize.isAccessibilitySize {
             HStack(spacing: 8) {
-                EmptyFeatureBadge(title: "경로 분석", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                EmptyFeatureBadge(title: "AI 기록", systemImage: "sparkles")
-                EmptyFeatureBadge(title: "EXIF 스탬프", systemImage: "text.below.photo")
+                EmptyFeatureBadge(title: "경로 지도", systemImage: "map")
+                EmptyFeatureBadge(title: "타임라인", systemImage: "clock")
+                EmptyFeatureBadge(title: "EXIF 공유", systemImage: "text.below.photo")
             }
         }
     }

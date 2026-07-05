@@ -30,16 +30,18 @@ struct AnalysisProgressView: View {
                     // Blurred background
                     backgroundView
                     
-                    VStack(spacing: 40) {
+                    VStack(spacing: 24) {
                         // Title
                         VStack(spacing: 8) {
-                            Text(viewModel.currentStep)
+                            Text(viewModel.currentStep.title)
                                 .font(.title2)
                                 .fontWeight(.bold)
+                                .multilineTextAlignment(.center)
                             
-                            Text("위치 데이터를 정제하고 있습니다")
+                            Text(viewModel.currentStep.subtitle)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
                         
                         // Circular Progress
@@ -48,12 +50,14 @@ struct AnalysisProgressView: View {
                         // Linear Progress
                         linearProgressView
                         
-                        // Description
-                        Text("잠시만 기다려 주세요. 사진의 메타데이터를 활용하여 상세 경로를 생성하고 있습니다.")
+                        Text("사진 원본은 서버 업로드 없이 이 기기에서 분석합니다. 취소하면 저장하지 않고 이전 화면으로 돌아갑니다.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 32)
+
+                        statusIndicator
                     }
                     .padding()
                 }
@@ -70,10 +74,9 @@ struct AnalysisProgressView: View {
                             .background(.ultraThinMaterial)
                             .clipShape(Circle())
                     }
+                    .accessibilityLabel("경로 분석 취소")
+                    .accessibilityHint("현재 분석을 중단하고 저장하지 않은 채 이전 화면으로 돌아갑니다.")
                     .padding()
-                }
-                .overlay(alignment: .bottom) {
-                    statusIndicator
                 }
                 .task {
                     viewModel.modelContext = modelContext
@@ -82,11 +85,19 @@ struct AnalysisProgressView: View {
             }
         }
         .alert("분석 오류", isPresented: $viewModel.showingError) {
-            Button("확인") {
+            Button("다시 시도") {
+                Task {
+                    await viewModel.startAnalysis()
+                }
+            }
+
+            Button("사진 다시 선택") {
                 dismiss()
             }
+
+            Button("닫기", role: .cancel) {}
         } message: {
-            Text(viewModel.errorMessage)
+            Text(viewModel.errorRecoveryMessage)
         }
     }
     
@@ -111,7 +122,7 @@ struct AnalysisProgressView: View {
             // Background circle
             Circle()
                 .stroke(Color(.systemGray5), lineWidth: 12)
-                .frame(width: 200, height: 200)
+                .frame(width: 176, height: 176)
             
             // Progress circle
             Circle()
@@ -120,26 +131,25 @@ struct AnalysisProgressView: View {
                     Color.primaryBlue,
                     style: StrokeStyle(lineWidth: 12, lineCap: .round)
                 )
-                .frame(width: 200, height: 200)
+                .frame(width: 176, height: 176)
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.3), value: viewModel.progress)
             
             // Text
             VStack(spacing: 4) {
                 Text("\(Int(viewModel.progress * 100))%")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
                 
-                Text("PROCESSING")
+                Text("분석 중")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(Color.primaryBlue)
-                    .tracking(1.5)
             }
             
             // Pulse animation
             Circle()
                 .stroke(Color.primaryBlue.opacity(0.3), lineWidth: 2)
-                .frame(width: 220, height: 220)
+                .frame(width: 196, height: 196)
                 .scaleEffect(viewModel.isPulsing ? 1.1 : 1.0)
                 .opacity(viewModel.isPulsing ? 0 : 1)
                 .animation(
@@ -154,13 +164,19 @@ struct AnalysisProgressView: View {
     
     private var linearProgressView: some View {
         VStack(spacing: 12) {
-            HStack {
-                Text("\(viewModel.processedCount)/\(viewModel.totalCount) 사진 처리 완료")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Spacer()
-                
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.progressTitle)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+
+                    Text(viewModel.currentStep.context)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color.primaryBlue)
             }
@@ -181,7 +197,7 @@ struct AnalysisProgressView: View {
         }
         .padding(.horizontal, 32)
     }
-    
+
     private var statusIndicator: some View {
         HStack(spacing: 8) {
             Circle()
@@ -193,26 +209,64 @@ struct AnalysisProgressView: View {
                     value: viewModel.isPulsing
                 )
             
-            Text("ON-DEVICE ANALYSIS")
+            Text("사진 원본 서버 업로드 없음")
                 .font(.caption2)
                 .fontWeight(.bold)
-                .tracking(1.2)
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("온디바이스 분석 진행 중")
+                .accessibilityLabel("사진 원본은 서버에 업로드하지 않고 분석 중")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .clipShape(Capsule())
-        .padding(.bottom, 40)
     }
+}
+
+enum AnalysisStep {
+    case metadata
+    case ocr
+    case route
+    case summary
+
+    var copy: (title: String, subtitle: String, context: String) {
+        switch self {
+        case .metadata:
+            return (
+                "사진 정보 확인 중",
+                "촬영 시간과 GPS 정보를 먼저 정리합니다",
+                "원본 사진에서 날짜, 시간, 위치 정보를 확인하고 있어요."
+            )
+        case .ocr:
+            return (
+                "위치 단서 읽는 중",
+                "GPS가 없는 사진은 글자 단서를 확인합니다",
+                "표지판, 영수증, 장소 이름 같은 글자를 위치 단서로 살펴봅니다."
+            )
+        case .route:
+            return (
+                "지도 경로 만드는 중",
+                "확인한 사진을 시간순 경로로 연결합니다",
+                "정렬된 사진을 지도 경로와 타임라인으로 묶는 단계입니다."
+            )
+        case .summary:
+            return (
+                "여정 요약 준비 중",
+                "완성된 경로를 보기 좋게 정리합니다",
+                "잠시 후 저장된 경로 지도로 바로 이동합니다."
+            )
+        }
+    }
+
+    var title: String { copy.title }
+    var subtitle: String { copy.subtitle }
+    var context: String { copy.context }
 }
 
 @MainActor
 class AnalysisViewModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var processedCount: Int = 0
-    @Published var currentStep: String = "도로명 인식 중..."
+    @Published var currentStep: AnalysisStep = .metadata
     @Published var isPulsing: Bool = false
     @Published var showingError: Bool = false
     @Published var errorMessage: String = ""
@@ -220,6 +274,24 @@ class AnalysisViewModel: ObservableObject {
     
     let photos: [LoadedPhoto]
     var totalCount: Int { photos.count }
+
+    var progressTitle: String {
+        switch currentStep {
+        case .route, .summary:
+            return "\(totalCount)장 확인 완료"
+        case .metadata, .ocr:
+            return "\(processedCount)/\(totalCount)장 확인 중"
+        }
+    }
+
+    var errorRecoveryMessage: String {
+        let detail = errorMessage.isEmpty ? "알 수 없는 오류가 발생했습니다." : errorMessage
+        return """
+        \(detail)
+
+        같은 사진으로 다시 시도하거나, 사진을 다시 선택해 GPS가 있는 사진을 더해 보세요.
+        """
+    }
     
     private let ocrService = OCRService()
     private let metadataService = PhotoMetadataService()
@@ -231,10 +303,12 @@ class AnalysisViewModel: ObservableObject {
     }
     
     func startAnalysis() async {
+        resetProgressForNewRun()
+
         var photoRecords: [PhotoRecord] = []
         
         // Step 1: 메타데이터 추출 및 시간순 정렬
-        currentStep = "GPS/메타데이터 수집 중..."
+        currentStep = .metadata
         
         var photosWithMetadata: [(photo: LoadedPhoto, metadata: PhotoMetadata)] = []
         
@@ -254,7 +328,7 @@ class AnalysisViewModel: ObservableObject {
         // Step 2: OCR 실행 (GPS 없는 사진에만)
         let needsOCRCount = photosWithMetadata.filter { $0.metadata.coordinate == nil }.count
         if needsOCRCount > 0 {
-            currentStep = "도로명 인식 중..."
+            currentStep = .ocr
         }
         
         for (index, item) in photosWithMetadata.enumerated() {
@@ -335,7 +409,8 @@ class AnalysisViewModel: ObservableObject {
         guard !isCancelled else { return }
         
         // Step 3: 경로 재구성
-        currentStep = "경로 생성 중..."
+        currentStep = .route
+        processedCount = totalCount
         progress = 0.95
         
         do {
@@ -344,7 +419,7 @@ class AnalysisViewModel: ObservableObject {
                 modelContext: modelContext
             )
 
-            currentStep = "AI 요약 생성 중..."
+            currentStep = .summary
             progress = 0.98
 
             let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
@@ -380,9 +455,19 @@ class AnalysisViewModel: ObservableObject {
             showingError = true
         }
     }
-    
+
     func cancelAnalysis() {
         isCancelled = true
+    }
+
+    private func resetProgressForNewRun() {
+        isCancelled = false
+        progress = 0
+        processedCount = 0
+        currentStep = .metadata
+        showingError = false
+        errorMessage = ""
+        completedRoute = nil
     }
     
     // 메타데이터를 보존하면서 이미지 압축

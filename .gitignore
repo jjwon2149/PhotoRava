@@ -145,3 +145,9 @@ xcuserdata
 /Derived/
 /PhotoRava.xcodeproj/
 /PhotoRava.xcworkspace/
+
+# LazyCodex local execution artifacts
+/.omo/boulder.json
+/.omo/drafts/
+/.omo/evidence/
+/.omo/lazycodex-executor-verify/
