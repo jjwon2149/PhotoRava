@@ -21,6 +21,13 @@
 
 ## 컨텍스트 정책
 
+### 하위 규칙
+
+- `PhotoRava/PhotoRava/AGENTS.md`: 앱 소스 루트 공통 규칙.
+- `PhotoRava/PhotoRava/Models/AGENTS.md`: SwiftData 영속 모델 규칙.
+- `PhotoRava/PhotoRava/Services/AGENTS.md`: 메타데이터/OCR/경로/렌더링 서비스 규칙.
+- `PhotoRava/PhotoRava/Views/AGENTS.md`: SwiftUI 화면 흐름과 수동 QA 규칙.
+
 ### 항상 참고
 
 - `README.md`
@@ -52,6 +59,44 @@
 - `PhotoRava/PhotoRava/Assets.xcassets/AppIcon.appiconset/*.png`
 - `WORKFLOW.md`
 - 생성된 `PhotoRava.xcodeproj/`
+
+## 명령
+
+### 프로젝트 생성
+
+```sh
+tuist generate
+```
+
+### 시뮬레이터 빌드
+
+```sh
+xcodebuild -workspace PhotoRava.xcworkspace \
+  -scheme PhotoRava \
+  -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/PhotoRava-build \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+### 릴리즈 아카이브
+
+```sh
+xcodebuild -workspace PhotoRava.xcworkspace \
+  -scheme PhotoRava \
+  -configuration Release \
+  -destination 'generic/platform=iOS' \
+  -archivePath /tmp/PhotoRava.xcarchive \
+  archive
+```
+
+## 릴리즈/외부 연동 주의
+
+- 현재 저장소에는 테스트 타깃, test plan, CI workflow, Fastlane, export options, provisioning guide가 없다.
+- `Project.swift`의 `DEVELOPMENT_TEAM`은 비어 있다. 배포 서명/export는 로컬 Xcode 계정 또는 비공개 설정으로 검증한다.
+- AdMob 기본값은 Google demo ID다. production `ADMOB_APPLICATION_IDENTIFIER`, `ADMOB_ROUTE_LIST_BANNER_AD_UNIT_IDENTIFIER`는 빌드 설정으로만 비공개 주입하고 커밋하지 않는다.
+- `docs/reviewer-guide.md`는 외부 리뷰어용 빠른 진입 문서다.
 
 ## 수정 우선순위
 
