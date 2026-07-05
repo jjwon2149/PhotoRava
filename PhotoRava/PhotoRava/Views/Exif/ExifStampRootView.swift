@@ -147,11 +147,11 @@ struct ExifStampRootView: View {
             }
             
             VStack(spacing: 8) {
-                Text("EXIF 문구 새기기")
+                Text("EXIF 스탬프 만들기")
                     .font(.title2)
                     .fontWeight(.bold)
                 
-                Text("사진에 패딩을 추가하고\n카메라/노출 정보 등을 하단에 새깁니다.")
+                Text("사진에 카메라/노출 정보를 새긴 이미지를 만들고,\n원하면 같은 사진으로 경로 지도와 타임라인도 분석할 수 있습니다.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -760,6 +760,40 @@ private struct ExifStampOptionsCard<Content: View>: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+    }
+}
+
+private struct ExifStampRouteAnalysisCard: View {
+    let summary: String
+    let detail: String
+    let buttonTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(summary)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(action: action) {
+                Label(buttonTitle, systemImage: "map.fill")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(Color.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(14)
+        .background(Color.blue.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -1455,29 +1489,29 @@ private struct ExifStampExportTab: View {
                             .padding(.top, 6)
                         }
 
-                        if viewModel.exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(summary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                
-                                Button {
-                                    Task {
-                                        await viewModel.preparePhotosForRouteAnalysis()
-                                    }
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "map.fill")
-                                        Text("이 사진들로 경로 분석하기")
-                                    }
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 44)
-                                    .background(Color.blue)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                        if viewModel.exportTarget == .single, let summary = viewModel.singleExportResultMessage {
+                            ExifStampRouteAnalysisCard(
+                                summary: summary,
+                                detail: "스탬프 이미지는 저장/공유용으로 남기고, 같은 원본 사진의 위치 정보로 경로 지도와 타임라인을 이어서 만들 수 있습니다.",
+                                buttonTitle: "이 사진으로 경로 분석하기"
+                            ) {
+                                Task {
+                                    await viewModel.preparePhotosForRouteAnalysis()
                                 }
-                                .padding(.top, 4)
+                            }
+                        }
+
+                        if viewModel.exportTarget == .batch, let summary = viewModel.batchExportState.lastSummary {
+                            ExifStampRouteAnalysisCard(
+                                summary: summary,
+                                detail: viewModel.batchExportState.completed > 0
+                                    ? "성공한 스탬프 이미지는 저장/공유되었습니다. 같은 사진들로 경로 지도와 타임라인을 이어서 분석할 수 있습니다."
+                                    : "스탬프 이미지가 만들어지지 않은 사진은 실패 내역을 확인한 뒤 다시 시도해주세요.",
+                                buttonTitle: "이 사진들로 경로 분석하기"
+                            ) {
+                                Task {
+                                    await viewModel.preparePhotosForRouteAnalysis()
+                                }
                             }
                         }
 
@@ -1614,7 +1648,7 @@ private struct ExifStampExportTab: View {
                 }
             }
         } message: {
-            Text("사진이 성공적으로 저장되었습니다. 이 사진들의 위치 정보를 사용하여 경로를 분석하시겠습니까?")
+            Text("사진이 성공적으로 저장되었습니다. 내보낸 사진은 공유용으로 쓰고, 같은 사진의 위치 정보로 경로도 분석할 수 있습니다.")
         }
     }
 
@@ -1708,6 +1742,7 @@ final class ExifStampViewModel: ObservableObject {
     @Published var selectedItem: PhotosPickerItem? {
         didSet { 
             guard let selectedItem else { return }
+            singleExportResultMessage = nil
             
             // Update active photo identifier
             activePhotoIdentifier = selectedItem.itemIdentifier
@@ -1726,6 +1761,7 @@ final class ExifStampViewModel: ObservableObject {
     }
     @Published var batchSelectedItems: [PhotosPickerItem] = [] {
         didSet { 
+            singleExportResultMessage = nil
             rebuildBatchSelection()
             // 여러 장이 선택되면 즉시 일괄 모드로 전환
             if !batchSelectedItems.isEmpty {
@@ -1739,6 +1775,7 @@ final class ExifStampViewModel: ObservableObject {
     @Published var errorMessage = ""
     @Published var batchExportState = ExifStampBatchExportState()
     @Published var showingAnalysisSuggestion = false
+    @Published var singleExportResultMessage: String?
     @Published var exportTarget: ExifStampExportTarget = .single
     @Published private(set) var activePhotoIdentifier: String?
 
@@ -2258,6 +2295,7 @@ final class ExifStampViewModel: ObservableObject {
             } completionHandler: { success, error in
                 DispatchQueue.main.async {
                     if success && error == nil {
+                        self.singleExportResultMessage = "저장 완료: EXIF 스탬프 이미지가 사진 앱에 저장되었습니다."
                         self.showingAnalysisSuggestion = true
                     } else {
                         self.showError("저장에 실패했습니다.")
@@ -2271,6 +2309,12 @@ final class ExifStampViewModel: ObservableObject {
     func shareRendered() {
         guard let url = exportTempFileURL() else { return }
         let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        activityVC.completionWithItemsHandler = { [weak self] _, completed, _, _ in
+            guard completed else { return }
+            Task { @MainActor [weak self] in
+                self?.singleExportResultMessage = "공유 완료: EXIF 스탬프 이미지를 공유했습니다."
+            }
+        }
         present(activityVC)
     }
 
@@ -2342,6 +2386,7 @@ final class ExifStampViewModel: ObservableObject {
         snapshotOverride: BatchSnapshot? = nil
     ) {
         guard !batchExportState.isRunning else { return }
+        singleExportResultMessage = nil
 
         let sources = sourcesOverride ?? batchSources
         guard !sources.isEmpty else {
