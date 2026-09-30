@@ -28,9 +28,21 @@ tuist generate
 xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoRava-build CODE_SIGNING_ALLOWED=NO build
 ```
 
+## Reliability Tests
+
+The route reliability release adds the `PhotoRavaTests` unit-test target to the `PhotoRava` scheme. Regenerate the workspace before running tests:
+
+```sh
+tuist generate
+xcodebuild -showdestinations -workspace PhotoRava.xcworkspace -scheme PhotoRava
+xcodebuild -workspace PhotoRava.xcworkspace -scheme PhotoRava -destination 'platform=iOS Simulator,id=<SIMULATOR_UDID>' -derivedDataPath /tmp/PhotoRava-test CODE_SIGNING_ALLOWED=NO test
+```
+
+Replace `<SIMULATOR_UDID>` with an available destination. Tests cover route geometry, derived-data recovery, and analysis persistence/cancellation using controlled inputs. Actual verification results and remaining release checks are recorded in [the reliability validation report](releases/route-reliability-validation.md).
+
 ## Manual Verification
 
-The repository does not currently include an automated test target. Use focused manual checks:
+Automated tests do not replace the following checks with real photos and existing installations:
 
 - Route flow:
   - Select photos with GPS metadata and photos without GPS metadata.

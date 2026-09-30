@@ -18,7 +18,7 @@
 - `Derived/InfoPlists/PhotoRava-Info.plist`는 실제 앱 Info.plist다. 권한 문구, AdMob key, bundle setting placeholder 변경 시만 수정한다.
 - 권한 문구 변경은 `SettingsView.swift`, `privacy-policy.md`, `support.md`와 함께 확인한다.
 - `Assets.xcassets/AppIcon.appiconset/*.png`는 요청 없이는 읽거나 수정하지 않는다.
-- 앱 전체 동작 변경 후에는 자동 테스트가 없으므로 `tuist generate`와 simulator build를 최소 검증으로 삼는다.
+- 앱 전체 동작 변경 후에는 `tuist generate`, simulator build, `PhotoRava` scheme의 `PhotoRavaTests`를 실행한다. 실제 사진·권한·업그레이드 흐름은 수동 QA로 보완한다.
 
 ## 릴리즈/광고
 

@@ -79,20 +79,31 @@ struct AnalysisProgressView: View {
                     .padding()
                 }
                 .task {
-                    viewModel.modelContext = modelContext
-                    await viewModel.startAnalysis()
+                    viewModel.configure(modelContext: modelContext)
+                    viewModel.startAnalysis()
                 }
             }
         }
-        .alert("분석 오류", isPresented: $viewModel.showingError) {
-            Button("다시 시도") {
-                Task {
-                    await viewModel.startAnalysis()
+        .onDisappear {
+            if viewModel.completedRoute == nil {
+                viewModel.cancelAnalysis()
+            }
+        }
+        .alert(viewModel.errorTitle, isPresented: $viewModel.showingError) {
+            if viewModel.requiresListReload {
+                Button("경로 목록으로 이동") {
+                    dismiss()
+                }
+            } else {
+                Button("다시 시도") {
+                    viewModel.retry()
                 }
             }
 
-            Button("사진 다시 선택") {
-                dismiss()
+            if !viewModel.requiresListReload {
+                Button("사진 다시 선택") {
+                    dismiss()
+                }
             }
 
             Button("닫기", role: .cancel) {}
@@ -271,6 +282,7 @@ class AnalysisViewModel: ObservableObject {
     @Published var showingError: Bool = false
     @Published var errorMessage: String = ""
     @Published var completedRoute: Route?
+    @Published private(set) var requiresListReload = false
     
     let photos: [LoadedPhoto]
     var totalCount: Int { photos.count }
@@ -286,24 +298,75 @@ class AnalysisViewModel: ObservableObject {
 
     var errorRecoveryMessage: String {
         let detail = errorMessage.isEmpty ? "알 수 없는 오류가 발생했습니다." : errorMessage
+        if requiresListReload {
+            return detail
+        }
+        if coordinator?.phase == .failed(canRetrySave: true) {
+            return "\(detail)\n\n같은 분석 결과의 저장을 다시 시도해 주세요."
+        }
         return """
         \(detail)
 
         같은 사진으로 다시 시도하거나, 사진을 다시 선택해 GPS가 있는 사진을 더해 보세요.
         """
     }
+
+    var errorTitle: String {
+        requiresListReload || coordinator?.phase == .failed(canRetrySave: true) ? "저장 오류" : "분석 오류"
+    }
     
     private let ocrService = OCRService()
     private let metadataService = PhotoMetadataService()
-    private var isCancelled = false
-    var modelContext: ModelContext?
+    private var coordinator: RouteAnalysisCoordinator?
     
     init(photos: [LoadedPhoto]) {
         self.photos = photos
     }
     
-    func startAnalysis() async {
+    func configure(modelContext: ModelContext) {
+        guard coordinator == nil else { return }
+        coordinator = RouteAnalysisCoordinator(
+            persistence: SwiftDataRouteAnalysisPersistence(resultContext: modelContext)
+        )
+    }
+
+    func startAnalysis() {
         resetProgressForNewRun()
+
+        coordinator?.start(
+            operation: { [weak self] in
+                guard let self else { throw CancellationError() }
+                return try await self.buildDraft()
+            },
+            onFailure: { [weak self] error, canRetrySave in
+                self?.present(error: error, isSaveFailure: canRetrySave)
+            },
+            onCompletion: { [weak self] route in
+                self?.completedRoute = route
+                self?.progress = 1.0
+            }
+        )
+    }
+
+    func retry() {
+        guard let coordinator else { return }
+        if coordinator.phase == .failed(canRetrySave: true) {
+            showingError = false
+            coordinator.retryPersistence(
+                onFailure: { [weak self] error, _ in
+                    self?.present(error: error, isSaveFailure: true)
+                },
+                onCompletion: { [weak self] route in
+                    self?.completedRoute = route
+                    self?.progress = 1.0
+                }
+            )
+        } else {
+            startAnalysis()
+        }
+    }
+
+    private func buildDraft() async throws -> RouteAnalysisDraft {
 
         var photoRecords: [PhotoRecord] = []
         
@@ -313,14 +376,17 @@ class AnalysisViewModel: ObservableObject {
         var photosWithMetadata: [(photo: LoadedPhoto, metadata: PhotoMetadata)] = []
         
         for (index, photo) in photos.enumerated() {
-            guard !isCancelled else { break }
+            try Task.checkCancellation()
             
             let metadata = await metadataService.extractMetadata(from: photo.image, asset: photo.asset, originalData: photo.originalData)
+            try Task.checkCancellation()
             photosWithMetadata.append((photo, metadata))
             
             processedCount = index + 1
             progress = Double(processedCount) / Double(max(totalCount, 1)) * 0.3
         }
+
+        try Task.checkCancellation()
         
         // 촬영 시간순 정렬
         photosWithMetadata.sort { $0.metadata.capturedAt < $1.metadata.capturedAt }
@@ -332,7 +398,7 @@ class AnalysisViewModel: ObservableObject {
         }
         
         for (index, item) in photosWithMetadata.enumerated() {
-            guard !isCancelled else { break }
+            try Task.checkCancellation()
             
             let photo = item.photo
             let metadata = item.metadata
@@ -346,6 +412,7 @@ class AnalysisViewModel: ObservableObject {
             if metadata.coordinate == nil {
                 do {
                     let recognizedTexts = try await ocrService.recognizeText(in: photo.image)
+                    try Task.checkCancellation()
                     
                     // AI 분석을 위한 원본 데이터 보관
                     rawOCRText = recognizedTexts.map { $0.rawText }.joined(separator: "\n")
@@ -357,6 +424,9 @@ class AnalysisViewModel: ObservableObject {
                         confidence = best.confidence
                     }
                 } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
                     print("OCR failed for photo \(index): \(error)")
                 }
             }
@@ -367,7 +437,9 @@ class AnalysisViewModel: ObservableObject {
             // 이미지 데이터 저장 - PHAsset이 있으면 원본 데이터 사용, 없으면 압축
             if let asset = photo.asset {
                 // 원본 이미지 데이터 가져오기 (메타데이터 보존)
-                if let originalData = await metadataService.fetchOriginalImageData(for: asset) {
+                let fetchedOriginalData = await metadataService.fetchOriginalImageData(for: asset)
+                try Task.checkCancellation()
+                if let originalData = fetchedOriginalData {
                     // 원본 데이터가 너무 크면 적절히 압축 (하지만 메타데이터는 보존)
                     if originalData.count > 5_000_000 { // 5MB 이상이면
                         // 메타데이터를 보존하면서 압축
@@ -375,6 +447,7 @@ class AnalysisViewModel: ObservableObject {
                             originalData: originalData,
                             maxSize: 2_000_000 // 2MB로 제한
                         )
+                        try Task.checkCancellation()
                     } else {
                         record.imageData = originalData
                     }
@@ -401,73 +474,71 @@ class AnalysisViewModel: ObservableObject {
             processedCount = index + 1
             let base = Double(processedCount) / Double(max(totalCount, 1))
             progress = 0.3 + base * 0.6
-            
-            // UI 업데이트를 위한 짧은 딜레이
-            try? await Task.sleep(for: .milliseconds(100))
         }
         
-        guard !isCancelled else { return }
+        try Task.checkCancellation()
         
         // Step 3: 경로 재구성
         currentStep = .route
         processedCount = totalCount
         progress = 0.95
         
-        do {
-            let route = try await RouteReconstructionService.shared.reconstructRoute(
-                from: photoRecords,
-                modelContext: modelContext
+        let route = try await RouteReconstructionService.shared.reconstructRoute(from: photoRecords)
+        try Task.checkCancellation()
+
+        currentStep = .summary
+        progress = 0.98
+
+        let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
+        if #available(iOS 26.0, *) {
+            if let summary = try? await LocalAIService.shared.routeNarrator(snapshot: snapshot) {
+                try Task.checkCancellation()
+                route.apply(summary: summary)
+            }
+            try Task.checkCancellation()
+        } else {
+            let summary = RouteStoredSummary.fallback(
+                for: snapshot,
+                tonePreference: .warm
             )
-
-            currentStep = .summary
-            progress = 0.98
-
-            let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
-            if #available(iOS 26.0, *) {
-                if let summary = try? await LocalAIService.shared.routeNarrator(snapshot: snapshot) {
-                    route.apply(summary: summary)
-                }
-            } else {
-                let summary = RouteStoredSummary.fallback(
-                    for: snapshot,
-                    tonePreference: .warm
-                )
-                route.applyStoredSummary(
-                    title: summary.title,
-                    caption: summary.caption,
-                    diary: summary.diary,
-                    highlights: summary.highlights,
-                    toneRawValue: summary.toneRawValue,
-                    confidence: summary.confidence
-                )
-            }
-            
-            // SwiftData에 저장
-            if let context = modelContext {
-                context.insert(route)
-                try? context.save()
-            }
-            
-            completedRoute = route
-            progress = 1.0
-        } catch {
-            errorMessage = "경로 생성에 실패했습니다: \(error.localizedDescription)"
-            showingError = true
+            route.applyStoredSummary(
+                title: summary.title,
+                caption: summary.caption,
+                diary: summary.diary,
+                highlights: summary.highlights,
+                toneRawValue: summary.toneRawValue,
+                confidence: summary.confidence
+            )
         }
+
+        try Task.checkCancellation()
+        return RouteAnalysisDraft(route: route)
     }
 
     func cancelAnalysis() {
-        isCancelled = true
+        coordinator?.cancel()
     }
 
     private func resetProgressForNewRun() {
-        isCancelled = false
         progress = 0
         processedCount = 0
         currentStep = .metadata
         showingError = false
         errorMessage = ""
         completedRoute = nil
+        requiresListReload = false
+    }
+
+    private func present(error: Error, isSaveFailure: Bool) {
+        requiresListReload = error is RouteAnalysisPersistenceError
+        if isSaveFailure {
+            errorMessage = "경로를 저장하지 못했습니다. 저장된 기록은 없으며 같은 결과로 다시 저장할 수 있습니다."
+        } else if error is RouteAnalysisPersistenceError {
+            errorMessage = error.localizedDescription
+        } else {
+            errorMessage = "경로 생성에 실패했습니다: \(error.localizedDescription)"
+        }
+        showingError = true
     }
     
     // 메타데이터를 보존하면서 이미지 압축

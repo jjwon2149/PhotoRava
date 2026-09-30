@@ -36,7 +36,7 @@ PhotoRava helps people turn scattered trip photos into a route history and expor
 
 ## Current Gaps
 
-- There is no automated test target yet.
+- `PhotoRavaTests` covers route reliability; run it through the `PhotoRava` scheme after `tuist generate`. See `docs/workflows.md` for commands and the release validation report for actual results.
 - CI, signing, export options, and release automation are not configured.
 - The generated project builds in Swift 5 language mode; Swift 6 concurrency warnings remain as migration work.
 - Some route and EXIF flows still require manual validation with real or simulator photo-library data.

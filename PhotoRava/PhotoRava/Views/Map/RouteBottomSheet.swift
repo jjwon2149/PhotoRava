@@ -141,6 +141,16 @@ struct RouteBottomSheet: View {
                                 }
                             }
 
+                            if summaryDistanceNeedsRefresh {
+                                Label(
+                                    "경로 거리가 다시 계산되었습니다. ‘다시 만들기’로 요약의 거리를 갱신해 주세요.",
+                                    systemImage: "arrow.clockwise.circle"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
+
                             HStack(spacing: 8) {
                                 Spacer()
 
@@ -191,6 +201,11 @@ struct RouteBottomSheet: View {
                         value: formatDuration(viewModel.route.duration)
                     )
                 }
+
+                Text("거리는 사진 위치 사이의 직선거리를 합산한 값이며 실제 도로 이동 거리와 다를 수 있습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 
                 // Road names section
                 if !viewModel.route.roadNames.isEmpty {
@@ -255,6 +270,14 @@ struct RouteBottomSheet: View {
 
         return caption
     }
+
+    private var summaryDistanceNeedsRefresh: Bool {
+        guard let caption = visibleAICaption else { return false }
+        return !RouteGeometryCalculator.summaryDistanceMatches(
+            caption,
+            distanceKilometers: viewModel.route.totalDistance
+        )
+    }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
         let hours = Int(duration) / 3600
@@ -271,7 +294,7 @@ struct RouteBottomSheet: View {
         let summaryText = routeShareSummaryText()
         let text = """
         \(viewModel.route.name)
-        \(summaryText.isEmpty ? "" : "\(summaryText)\n")거리: \(String(format: "%.1f", viewModel.route.totalDistance))km
+        \(summaryText.isEmpty ? "" : "\(summaryText)\n")사진 위치 간 직선거리 합: \(String(format: "%.1f", viewModel.route.totalDistance))km
         소요 시간: \(formatDuration(viewModel.route.duration))
         """
 
@@ -450,7 +473,11 @@ struct RouteBottomSheet: View {
         var parts: [String] = []
 
         if let caption = viewModel.route.aiSummaryCaption,
-           !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+           !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           RouteGeometryCalculator.summaryDistanceMatches(
+            caption,
+            distanceKilometers: viewModel.route.totalDistance
+           ) {
             parts.append(caption)
         }
 

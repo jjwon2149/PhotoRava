@@ -8,6 +8,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import SwiftData
 
 struct TimelineDetailView: View {
     let route: Route
@@ -389,6 +390,8 @@ struct GeocodeRecommendationSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @State private var isProcessing = false
+    @State private var saveErrorMessage: String?
+    @State private var processingTask: Task<Void, Never>?
     
     var body: some View {
         NavigationStack {
@@ -445,12 +448,24 @@ struct GeocodeRecommendationSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
+            .alert("위치 저장 실패", isPresented: Binding(
+                get: { saveErrorMessage != nil },
+                set: { if !$0 { saveErrorMessage = nil } }
+            )) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(saveErrorMessage ?? "위치 변경이 저장되지 않았습니다.")
+            }
+        }
+        .onDisappear {
+            processingTask?.cancel()
         }
     }
     
     private func suggestionRow(_ query: String, confidence: Double, isTop: Bool) -> some View {
         Button {
-            Task { await selectQuery(query) }
+            processingTask?.cancel()
+            processingTask = Task { await selectQuery(query) }
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
@@ -483,23 +498,35 @@ struct GeocodeRecommendationSheet: View {
         
         do {
             let placemarks = try await geocoder.geocodeAddressString(searchString)
+            try Task.checkCancellation()
             if let location = placemarks.first?.location {
-                // 좌표 업데이트
-                photo.latitude = location.coordinate.latitude
-                photo.longitude = location.coordinate.longitude
-                photo.aiQuery = query
-                photo.aiConfidence = 1.0 // 사용자 확정
-                
-                // Route 통계 재계산
-                await RouteReconstructionService.shared.recalculateRouteData(for: route, modelContext: modelContext)
-                
-                // 저장
-                try? modelContext.save()
-                
+                let latitude = location.coordinate.latitude
+                let longitude = location.coordinate.longitude
+                let photoID = photo.id
+                let savedDraft = try await RouteMutationPersistence.commit(
+                    container: modelContext.container,
+                    routeID: route.id
+                ) { storedRoute, _ in
+                    guard let storedPhoto = storedRoute.photoRecords.first(where: { $0.id == photoID }) else {
+                        return
+                    }
+                    storedPhoto.latitude = latitude
+                    storedPhoto.longitude = longitude
+                    storedPhoto.aiQuery = query
+                    storedPhoto.aiConfidence = 1.0
+                }
+                try savedDraft.apply(to: route, in: modelContext)
                 dismiss()
             }
         } catch {
-            print("Geocoding failed for selected query: \(error)")
+            if error is CancellationError || Task.isCancelled { return }
+            if let mutationError = error as? RouteMutationPersistenceError,
+               case .committedMutationUnavailable = mutationError {
+                print("Saved location could not be refreshed in the current view.")
+                dismiss()
+            } else {
+                saveErrorMessage = "위치 변경이 저장되지 않았습니다. 다시 시도해 주세요.\n\n\(error.localizedDescription)"
+            }
         }
     }
 }

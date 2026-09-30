@@ -32,10 +32,10 @@ let project = Project(
             settings: .settings(
                 base: [
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
-                    "CURRENT_PROJECT_VERSION": "8",
+                    "CURRENT_PROJECT_VERSION": "9",
                     "DEVELOPMENT_TEAM": "",
                     "GENERATE_INFOPLIST_FILE": "NO",
-                    "MARKETING_VERSION": "1.0.3",
+                    "MARKETING_VERSION": "1.0.4",
                     "PRODUCT_NAME": "PhotoRava",
                     "SWIFT_VERSION": "5.0",
                     "TARGETED_DEVICE_FAMILY": "1",
@@ -44,6 +44,32 @@ let project = Project(
                     "ADMOB_ROUTE_LIST_BANNER_AD_UNIT_IDENTIFIER": "ca-app-pub-3940256099942544/2435281174"
                 ]
             )
+        ),
+        .target(
+            name: "PhotoRavaTests",
+            destinations: .iOS,
+            product: .unitTests,
+            bundleId: "com.mabataki.smithwrld999.PhotoRavaTests",
+            deploymentTargets: .iOS("17.0"),
+            infoPlist: .default,
+            sources: ["PhotoRavaTests/**"],
+            dependencies: [
+                .target(name: "PhotoRava")
+            ],
+            settings: .settings(
+                base: [
+                    "SWIFT_VERSION": "5.0",
+                    "TARGETED_DEVICE_FAMILY": "1"
+                ]
+            )
+        )
+    ],
+    schemes: [
+        .scheme(
+            name: "PhotoRava",
+            shared: true,
+            buildAction: .buildAction(targets: ["PhotoRava"]),
+            testAction: .targets(["PhotoRavaTests"])
         )
     ]
 )

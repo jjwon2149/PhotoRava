@@ -15,6 +15,11 @@ struct RouteEditView: View {
     @State private var editMode: EditMode = .inactive
     @State private var showingDeleteAlert = false
     @State private var isRecalculating = false
+    @State private var draftName: String
+    @State private var draftRecordIDs: [UUID]
+    @State private var draftRoadNames: [UUID: String]
+    @State private var saveErrorMessage: String?
+    @State private var saveTask: Task<Void, Never>?
     
     // AI 관련 상태
     @State private var isGeneratingAI = false
@@ -23,13 +28,22 @@ struct RouteEditView: View {
     @State private var aiDiary: String?
     @State private var aiHighlights: [String] = []
     @State private var selectedSummaryTone: RouteSummaryTonePreference = .warm
+
+    init(route: Route) {
+        self.route = route
+        _draftName = State(initialValue: route.name)
+        _draftRecordIDs = State(initialValue: route.photoRecords.map(\.id))
+        _draftRoadNames = State(initialValue: Dictionary(
+            uniqueKeysWithValues: route.photoRecords.map { ($0.id, $0.roadName ?? "") }
+        ))
+    }
     
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     HStack {
-                        TextField("경로 이름", text: $route.name)
+                        TextField("경로 이름", text: $draftName)
                             .font(.headline)
                         
                         if visibleAICaption == nil {
@@ -152,8 +166,9 @@ struct RouteEditView: View {
                     }
                 }
                 
-                Section("사진 (\(route.photoRecords.count)개)") {
-                    ForEach(route.photoRecords) { record in
+                Section("사진 (\(draftRecordIDs.count)개)") {
+                    ForEach(draftRecordIDs, id: \.self) { recordID in
+                        if let record = route.photoRecords.first(where: { $0.id == recordID }) {
                         HStack(spacing: 12) {
                             // Thumbnail
                             if let imageData = record.imageData,
@@ -167,8 +182,8 @@ struct RouteEditView: View {
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 TextField("도로명", text: Binding(
-                                    get: { record.roadName ?? "" },
-                                    set: { record.roadName = $0.isEmpty ? nil : $0 }
+                                    get: { draftRoadNames[recordID] ?? "" },
+                                    set: { draftRoadNames[recordID] = $0 }
                                 ))
                                 .font(.subheadline)
                                 
@@ -176,6 +191,7 @@ struct RouteEditView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                        }
                         }
                     }
                     .onDelete(perform: deleteRecords)
@@ -195,6 +211,7 @@ struct RouteEditView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("취소") {
+                        saveTask?.cancel()
                         dismiss()
                     }
                 }
@@ -204,7 +221,8 @@ struct RouteEditView: View {
                         ProgressView()
                     } else {
                         Button("완료") {
-                            Task {
+                            saveTask?.cancel()
+                            saveTask = Task {
                                 await saveChanges()
                             }
                         }
@@ -216,13 +234,26 @@ struct RouteEditView: View {
                 }
             }
             .environment(\.editMode, $editMode)
+            .interactiveDismissDisabled(isRecalculating)
+            .onDisappear {
+                saveTask?.cancel()
+            }
             .alert("경로 삭제", isPresented: $showingDeleteAlert) {
                 Button("취소", role: .cancel) { }
                 Button("삭제", role: .destructive) {
-                    deleteRoute()
+                    saveTask?.cancel()
+                    saveTask = Task { await deleteRoute() }
                 }
             } message: {
                 Text("이 경로를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
+            }
+            .alert("변경사항 저장 실패", isPresented: Binding(
+                get: { saveErrorMessage != nil },
+                set: { if !$0 { saveErrorMessage = nil } }
+            )) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(saveErrorMessage ?? "변경사항이 저장되지 않았습니다.")
             }
             .task(id: route.id) {
                 syncStoredAISummary()
@@ -240,17 +271,18 @@ struct RouteEditView: View {
     }
     
     private func deleteRecords(at offsets: IndexSet) {
-        route.photoRecords.remove(atOffsets: offsets)
+        draftRecordIDs.remove(atOffsets: offsets)
     }
     
     private func moveRecords(from source: IndexSet, to destination: Int) {
-        route.photoRecords.move(fromOffsets: source, toOffset: destination)
+        draftRecordIDs.move(fromOffsets: source, toOffset: destination)
     }
     
     @MainActor
     private func generateAISummary() async {
         guard !isGeneratingAI else { return }
         isGeneratingAI = true
+        defer { isGeneratingAI = false }
         aiGenerationStatus = "경로 통계를 정리하는 중..."
         
         let snapshot = RouteReconstructionService.shared.buildStatsSnapshot(for: route)
@@ -265,57 +297,99 @@ struct RouteEditView: View {
                     snapshot: snapshot,
                     tonePreference: selectedSummaryTone
                 )
+                try Task.checkCancellation()
                 withAnimation {
-                    self.route.apply(summary: summary)
-                    syncStoredAISummary()
+                    draftName = summary.title
+                    aiCaption = summary.caption
+                    aiDiary = summary.diaryEntry
+                    aiHighlights = summary.highlights
                 }
             } else {
                 // 하위 버전 fallback
                 aiGenerationStatus = "대체 요약을 구성하는 중..."
                 try await Task.sleep(nanoseconds: 800_000_000)
                 withAnimation {
-                    self.route.applyStoredSummary(
-                        title: "✨ [AI] \(snapshot.startName) 여정",
-                        caption: "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록",
-                        diary: "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다.",
-                        highlights: ["경로 기록 보완", "감성 요약 생성", "이동 흐름 정리"],
-                        toneRawValue: selectedSummaryTone.rawValue,
-                        confidence: nil
-                    )
-                    syncStoredAISummary()
+                    draftName = "✨ [AI] \(snapshot.startName) 여정"
+                    aiCaption = "약 \(String(format: "%.1f", snapshot.distanceKm))km를 이동한 \(snapshot.timeOfDay ?? "오전")의 기록"
+                    aiDiary = "\(snapshot.timeOfDay ?? "오후")의 햇살이 따뜻했던 날, \(snapshot.startName)에서 여정을 시작했습니다. 발길 닿는 곳마다 펼쳐진 풍경들은 제법 낭만적이었고, \(snapshot.durationMin)분간의 시간은 온전히 저만의 여행이 되었습니다."
+                    aiHighlights = ["경로 기록 보완", "감성 요약 생성", "이동 흐름 정리"]
                 }
             }
-            try? modelContext.save()
         } catch {
+            if error is CancellationError || Task.isCancelled { return }
             print("AI summary generation failed: \(error.localizedDescription)")
         }
-        isGeneratingAI = false
     }
     
     private func saveChanges() async {
+        guard !isRecalculating else { return }
         isRecalculating = true
-        
-        // 파생 데이터 재계산 (Feature 3: 최적화 로직 포함됨)
-        await RouteReconstructionService.shared.recalculateRouteData(for: route, modelContext: modelContext)
-        
-        // SwiftData에 저장
-        try? modelContext.save()
-        
-        isRecalculating = false
-        dismiss()
+        defer { isRecalculating = false }
+
+        let recordIDs = draftRecordIDs
+        let roadNames = draftRoadNames
+        let name = draftName
+        let caption = aiCaption
+        let diary = aiDiary
+        let highlights = aiHighlights
+        let tone = selectedSummaryTone.rawValue
+
+        do {
+            let savedDraft = try await RouteMutationPersistence.commit(
+                container: modelContext.container,
+                routeID: route.id
+            ) { storedRoute, context in
+                storedRoute.name = name
+                storedRoute.aiSummaryCaption = caption
+                storedRoute.aiSummaryDiary = diary
+                storedRoute.aiSummaryHighlights = highlights
+                storedRoute.aiSummaryToneRawValue = tone
+
+                let recordsByID = Dictionary(
+                    uniqueKeysWithValues: storedRoute.photoRecords.map { ($0.id, $0) }
+                )
+                let removedRecords = storedRoute.photoRecords.filter { !recordIDs.contains($0.id) }
+                removedRecords.forEach(context.delete)
+                storedRoute.photoRecords = recordIDs.compactMap { recordID in
+                    guard let record = recordsByID[recordID] else { return nil }
+                    let value = roadNames[recordID]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    record.roadName = value.isEmpty ? nil : value
+                    return record
+                }
+            }
+
+            try savedDraft.apply(to: route, in: modelContext)
+            dismiss()
+        } catch {
+            if let mutationError = error as? RouteMutationPersistenceError,
+               case .committedMutationUnavailable = mutationError {
+                print("Saved route could not be refreshed in the current view.")
+                dismiss()
+            } else {
+                saveErrorMessage = "변경사항이 저장되지 않았습니다. 다시 시도해 주세요.\n\n\(error.localizedDescription)"
+            }
+        }
     }
     
-    private func deleteRoute() {
-        modelContext.delete(route)
-        try? modelContext.save()
-        dismiss()
+    @MainActor
+    private func deleteRoute() async {
+        guard !isRecalculating else { return }
+        isRecalculating = true
+        defer { isRecalculating = false }
+        do {
+            try RouteMutationPersistence.delete(
+                container: modelContext.container,
+                routeID: route.id
+            )
+            dismiss()
+        } catch {
+            saveErrorMessage = "경로를 삭제하지 못했습니다. 다시 시도해 주세요.\n\n\(error.localizedDescription)"
+        }
     }
 
     private func removeAIHighlight(at index: Int) {
         guard aiHighlights.indices.contains(index) else { return }
         aiHighlights.remove(at: index)
-        route.aiSummaryHighlights = aiHighlights
-        try? modelContext.save()
     }
 
     private func syncStoredAISummary() {

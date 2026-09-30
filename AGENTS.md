@@ -93,7 +93,7 @@ xcodebuild -workspace PhotoRava.xcworkspace \
 
 ## 릴리즈/외부 연동 주의
 
-- 현재 저장소에는 테스트 타깃, test plan, CI workflow, Fastlane, export options, provisioning guide가 없다.
+- `PhotoRavaTests` 단위 테스트 타깃은 `PhotoRava` scheme으로 실행한다. 명령은 `docs/workflows.md`를 참고한다. 별도 test plan, CI workflow, Fastlane, export options, provisioning guide는 없다.
 - `Project.swift`의 `DEVELOPMENT_TEAM`은 비어 있다. 배포 서명/export는 로컬 Xcode 계정 또는 비공개 설정으로 검증한다.
 - AdMob 기본값은 Google demo ID다. production `ADMOB_APPLICATION_IDENTIFIER`, `ADMOB_ROUTE_LIST_BANNER_AD_UNIT_IDENTIFIER`는 빌드 설정으로만 비공개 주입하고 커밋하지 않는다.
 - `docs/reviewer-guide.md`는 외부 리뷰어용 빠른 진입 문서다.

@@ -99,8 +99,12 @@ enum RouteSnapshotRenderer {
 
     private static func drawSummaryPanel(in context: CGContext, route: Route, size: CGSize) {
         let title = route.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let caption = route.aiSummaryCaption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stats = "\(String(format: "%.1f", route.totalDistance)) km · \(Int(route.duration / 60)) min"
+        let storedCaption = route.aiSummaryCaption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let caption = RouteGeometryCalculator.summaryDistanceMatches(
+            storedCaption,
+            distanceKilometers: route.totalDistance
+        ) ? storedCaption : ""
+        let stats = "사진 위치 간 직선거리 합 \(String(format: "%.1f", route.totalDistance)) km · \(Int(route.duration / 60)) min"
 
         guard !title.isEmpty || !caption.isEmpty else { return }
 

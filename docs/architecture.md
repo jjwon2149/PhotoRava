@@ -40,7 +40,7 @@
 - `Route.swift`, `PhotoRecord.swift`는 저장 스키마다. UI 변경처럼 보여도 이 파일 수정은 고위험이다.
 - `PhotoRava/PhotoRava/Derived/InfoPlists`는 앱 Info.plist를 보관한다. `Derived/Sources`의 예전 Tuist 헬퍼는 타깃 소스에서 제외한다.
 - `PhotoRava.xcworkspace`와 `PhotoRava.xcodeproj`는 `tuist generate`로 생성한다.
-- 현재 저장소에는 테스트 타깃, 테스트 플랜, CI, 릴리즈 자동화 스크립트가 없다.
+- `PhotoRavaTests`는 경로 계산·복구·저장·취소를 검증하는 단위 테스트 타깃이다. 실행 방법은 `docs/workflows.md`를 참고한다. 별도 테스트 플랜, CI, 릴리즈 자동화 스크립트는 없다.
 
 ## 어디부터 볼지
 

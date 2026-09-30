@@ -8,14 +8,16 @@
 import Foundation
 import CoreLocation
 import MapKit
-import SwiftData
 
-class RouteReconstructionService {
+@MainActor
+final class RouteReconstructionService {
     static let shared = RouteReconstructionService()
     private init() {}
     
     /// 기존 Route의 파생 데이터를 재계산하여 업데이트
-    func recalculateRouteData(for route: Route, modelContext: ModelContext? = nil) async {
+    func recalculateRouteData(for route: Route) async throws {
+        try Task.checkCancellation()
+
         // 시간순 정렬 (SwiftData @Relationship 배열은 직접 수정)
         let sortedRecords = route.photoRecords.sorted { $0.capturedAt < $1.capturedAt }
         
@@ -23,67 +25,68 @@ class RouteReconstructionService {
         route.photoRecords.removeAll()
         route.photoRecords.append(contentsOf: sortedRecords)
         
+        var aiUpdates: [(PhotoRecord, AIAnalysisUpdate)] = []
         for (index, record) in sortedRecords.enumerated() {
+            try Task.checkCancellation()
             if shouldAttemptAIAnalysis(for: record) {
                 if #available(iOS 26.0, *) {
-                    Task {
-                        await processAIAnalysis(
-                            for: record,
-                            index: index,
-                            in: sortedRecords,
-                            updateRoute: route,
-                            modelContext: modelContext
-                        )
+                    if let update = try await makeAIAnalysisUpdate(for: record, index: index, in: sortedRecords) {
+                        aiUpdates.append((record, update))
                     }
                 }
             }
         }
-        
-        // 초기 좌표 수집 (이미 있는 GPS 기반으로 먼저 경로 그리기)
-        updateRouteStatistics(route, sortedRecords: sortedRecords)
-        await persistChanges(in: modelContext)
+
+        try Task.checkCancellation()
+        aiUpdates.forEach { apply($0.1, to: $0.0) }
+        try updateRouteStatistics(route, sortedRecords: sortedRecords)
     }
 
     @available(iOS 26.0, *)
-    private func processAIAnalysis(
+    private func makeAIAnalysisUpdate(
         for record: PhotoRecord,
         index: Int,
-        in records: [PhotoRecord],
-        updateRoute: Route?,
-        modelContext: ModelContext?
-    ) async {
+        in records: [PhotoRecord]
+    ) async throws -> AIAnalysisUpdate? {
         let aiService = LocalAIService.shared
-        
-        // 1. 컨텍스트 구성
         let input = buildAIContextInput(for: record, index: index, in: records)
-        
+
         do {
-            // 2. AI 쿼리 계획 생성
+            try Task.checkCancellation()
             let plan = try await aiService.routeGeocodePlanner(input: input)
-            
-            // 3. PhotoRecord 업데이트 (UI 반영용)
-            record.aiQuery = plan.query
-            record.aiConfidence = plan.confidence
-            record.aiReason = plan.reason
-            record.aiAlternatives = plan.alternatives
-            
-            // 4. 지오코딩 시도 (AI Query 우선 - 신뢰도 0.75 이상 시 자동 확정)
+            try Task.checkCancellation()
+
+            var coordinate: StoredCoordinate?
             if plan.confidence >= 0.75 {
-                if let geocoded = try await geocodeWithAIPlan(plan) {
-                    record.latitude = geocoded.latitude
-                    record.longitude = geocoded.longitude
-                    
-                    // 5. Route 통계 재계산 트리거 (UI 알림용)
-                    if let route = updateRoute {
-                        await MainActor.run {
-                            updateRouteStatistics(route, sortedRecords: records)
-                        }
-                    }
-                }
+                coordinate = try await geocodeWithAIPlan(plan)
             }
-            await persistChanges(in: modelContext)
+            try Task.checkCancellation()
+
+            return AIAnalysisUpdate(
+                query: plan.query,
+                confidence: plan.confidence,
+                reason: plan.reason,
+                alternatives: plan.alternatives,
+                coordinate: coordinate
+            )
         } catch {
-            print("AI Analysis failed for record \(record.id): \(error.localizedDescription)")
+            if error is CancellationError || Task.isCancelled {
+                throw CancellationError()
+            }
+            // AI 보완은 선택 사항이다. 기존 GPS/OCR 결과로 계속 진행한다.
+            logNonSensitive(error, operation: "AI route location assistance")
+            return nil
+        }
+    }
+
+    private func apply(_ update: AIAnalysisUpdate, to record: PhotoRecord) {
+        record.aiQuery = update.query
+        record.aiConfidence = update.confidence
+        record.aiReason = update.reason
+        record.aiAlternatives = update.alternatives
+        if let coordinate = update.coordinate {
+            record.latitude = coordinate.latitude
+            record.longitude = coordinate.longitude
         }
     }
 
@@ -104,68 +107,26 @@ class RouteReconstructionService {
         return nil
     }
 
-    private func updateRouteStatistics(_ route: Route, sortedRecords: [PhotoRecord]) {
-        var coordinates: [StoredCoordinate] = []
-        for record in sortedRecords {
-            if let lat = record.latitude, let lon = record.longitude {
-                coordinates.append(StoredCoordinate(latitude: lat, longitude: lon))
+    private func updateRouteStatistics(_ route: Route, sortedRecords: [PhotoRecord]) throws {
+        let result = RouteGeometryCalculator.calculate(
+            from: sortedRecords.map {
+                RouteGeometryInput(
+                    capturedAt: $0.capturedAt,
+                    latitude: $0.latitude,
+                    longitude: $0.longitude,
+                    roadName: $0.roadName,
+                    fallbackRoadName: $0.aiQuery
+                )
             }
-        }
-        
-        // --- Feature 3: Path Optimization (Anomaly Detection) ---
-        let optimizedCoordinates = optimizePath(coordinates)
-        
-        // 좌표 데이터 저장 (최적화된 좌표 사용)
-        if let coordinatesData = try? JSONEncoder().encode(optimizedCoordinates) {
-            route.coordinatesData = coordinatesData
-        }
-        
-        route.totalDistance = calculateDistance(optimizedCoordinates)
-        route.duration = calculateDuration(from: sortedRecords)
-        route.roadNames = deduplicatedRoadNames(from: sortedRecords)
-    }
+        )
 
-    /// GPS 튐 현상이나 잘못된 OCR 좌표를 감지하여 경로를 매끄럽게 보정
-    private func optimizePath(_ coordinates: [StoredCoordinate]) -> [StoredCoordinate] {
-        guard coordinates.count > 2 else { return coordinates }
-        
-        var results = coordinates
-        
-        for i in 1..<(results.count - 1) {
-            let prev = results[i-1]
-            let current = results[i]
-            let next = results[i+1]
-            
-            let distPrev = calculateDistanceBetween(prev, current) // km
-            // 시간 데이터가 있다면 더 정확하겠지만, 여기서는 거리 기반 급격한 꺾임 감지 (Heuristic)
-            
-            // 단순 알고리즘: 이전/이후 지점과의 거리가 급격히 멀고, 
-            // 이전-이후 지점은 가까운 경우 (V자 튐 현상)
-            let distNext = calculateDistanceBetween(current, next)
-            let distDirect = calculateDistanceBetween(prev, next)
-            
-            if distPrev + distNext > distDirect * 2.5 && distDirect < 5.0 {
-                // 이상치 감지! (V자형 튐)
-                results[i].isAnomaly = true
-                results[i].isOptimized = true
-                
-                // 보정: 이전과 이후의 중간지점으로 이동
-                results[i].latitude = (prev.latitude + next.latitude) / 2
-                results[i].longitude = (prev.longitude + next.longitude) / 2
-                print("AI Optimization: Corrected anomaly at index \(i)")
-            }
-        }
-        
-        return results
-    }
-
-    private func calculateDistanceBetween(_ p1: StoredCoordinate, _ p2: StoredCoordinate) -> Double {
-        let loc1 = CLLocation(latitude: p1.latitude, longitude: p1.longitude)
-        let loc2 = CLLocation(latitude: p2.latitude, longitude: p2.longitude)
-        return loc1.distance(from: loc2) / 1000.0 // km
+        route.coordinatesData = try JSONEncoder().encode(result.coordinates)
+        route.totalDistance = result.distanceKilometers
+        route.duration = result.duration
+        route.roadNames = result.roadNames
     }
     
-    func reconstructRoute(from photoRecords: [PhotoRecord], modelContext: ModelContext? = nil) async throws -> Route {
+    func reconstructRoute(from photoRecords: [PhotoRecord]) async throws -> Route {
         guard !photoRecords.isEmpty else {
             throw RouteError.noPhotos
         }
@@ -177,6 +138,7 @@ class RouteReconstructionService {
         var coordinates: [StoredCoordinate] = []
         
         for record in sortedRecords {
+            try Task.checkCancellation()
             // GPS 좌표가 있으면 사용
             if let lat = record.latitude, let lon = record.longitude {
                 let coord = StoredCoordinate(latitude: lat, longitude: lon)
@@ -193,9 +155,27 @@ class RouteReconstructionService {
                         record.longitude = geocoded.longitude
                     }
                 } catch {
-                    print("Geocoding failed for \(roadName): \(error.localizedDescription)")
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    logNonSensitive(error, operation: "Route location lookup")
                 }
             }
+        }
+
+        for (index, record) in sortedRecords.enumerated() {
+            try Task.checkCancellation()
+            if shouldAttemptAIAnalysis(for: record), #available(iOS 26.0, *) {
+                if let update = try await makeAIAnalysisUpdate(for: record, index: index, in: sortedRecords) {
+                    try Task.checkCancellation()
+                    apply(update, to: record)
+                }
+            }
+        }
+
+        coordinates = sortedRecords.compactMap { record in
+            guard let latitude = record.latitude, let longitude = record.longitude else { return nil }
+            return StoredCoordinate(latitude: latitude, longitude: longitude)
         }
         
         guard !coordinates.isEmpty else {
@@ -217,26 +197,8 @@ class RouteReconstructionService {
         // 모든 PhotoRecord 추가 (도로명 없는 것도 포함)
         route.photoRecords = sortedRecords
         
-        // AI 분석 비동기 시작 (기존 GPS 위주로 먼저 생성 후 보완)
-        for (index, record) in sortedRecords.enumerated() {
-            if shouldAttemptAIAnalysis(for: record) {
-                if #available(iOS 26.0, *) {
-                    Task {
-                        await processAIAnalysis(
-                            for: record,
-                            index: index,
-                            in: sortedRecords,
-                            updateRoute: route,
-                            modelContext: modelContext
-                        )
-                    }
-                }
-            }
-        }
-
-        // 초기 좌표 수집 및 통계 계산
-        updateRouteStatistics(route, sortedRecords: sortedRecords)
-        await persistChanges(in: modelContext)
+        try Task.checkCancellation()
+        try updateRouteStatistics(route, sortedRecords: sortedRecords)
         
         return route
     }
@@ -274,17 +236,14 @@ class RouteReconstructionService {
         // 한국 지역 힌트 추가
         let searchString = roadName.contains("서울") ? roadName : "\(roadName), 대한민국"
         
-        do {
-            let placemarks = try await geocoder.geocodeAddressString(searchString)
-            
-            if let location = placemarks.first?.location {
-                return StoredCoordinate(
-                    latitude: location.coordinate.latitude,
-                    longitude: location.coordinate.longitude
-                )
-            }
-        } catch {
-            print("Geocoding failed for \(roadName): \(error)")
+        let placemarks = try await geocoder.geocodeAddressString(searchString)
+        try Task.checkCancellation()
+
+        if let location = placemarks.first?.location {
+            return StoredCoordinate(
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude
+            )
         }
         
         return nil
@@ -315,35 +274,6 @@ class RouteReconstructionService {
         }
         
         return hints
-    }
-    
-    private func calculateDistance(_ coordinates: [StoredCoordinate]) -> Double {
-        guard coordinates.count > 1 else { return 0 }
-        
-        var totalDistance: Double = 0
-        
-        for i in 0..<(coordinates.count - 1) {
-            let start = CLLocation(
-                latitude: coordinates[i].latitude,
-                longitude: coordinates[i].longitude
-            )
-            let end = CLLocation(
-                latitude: coordinates[i + 1].latitude,
-                longitude: coordinates[i + 1].longitude
-            )
-            
-            totalDistance += start.distance(from: end)
-        }
-        
-        // 미터를 킬로미터로 변환
-        return totalDistance / 1000.0
-    }
-    
-    private func calculateDuration(from records: [PhotoRecord]) -> TimeInterval {
-        guard let first = records.first?.capturedAt, let last = records.last?.capturedAt else {
-            return 0
-        }
-        return last.timeIntervalSince(first)
     }
     
     private func generateRouteName(baseDate: Date, firstRoadName: String?) -> String {
@@ -434,11 +364,19 @@ class RouteReconstructionService {
         return trimmed.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
 
-    @MainActor
-    private func persistChanges(in modelContext: ModelContext?) {
-        guard let modelContext else { return }
-        try? modelContext.save()
+    private func logNonSensitive(_ error: Error, operation: String) {
+        let nsError = error as NSError
+        print("\(operation) failed [\(nsError.domain):\(nsError.code)]")
     }
+
+}
+
+private struct AIAnalysisUpdate {
+    let query: String
+    let confidence: Double
+    let reason: String
+    let alternatives: [String]
+    let coordinate: StoredCoordinate?
 }
 
 struct RoadPoint {
