@@ -11,19 +11,29 @@ import UIKit
 
 struct RouteListAdBannerView: View {
     @State private var loadState: AdMobBannerLoadState = .loading
+    @State private var availableWidth: CGFloat = 0
 
     var body: some View {
         if let adUnitID = AdMobConfiguration.routeListBannerAdUnitIdentifier {
-            AdMobBannerContainer(
-                adUnitID: adUnitID,
-                loadState: $loadState
-            )
-            .frame(maxWidth: .infinity)
-            .frame(height: loadState.visibleHeight)
-            .opacity(loadState.isVisible ? 1 : 0)
+            GeometryReader { proxy in
+                if proxy.size.width >= AdSizeBanner.size.width {
+                    AdMobBannerContainer(adUnitID: adUnitID, loadState: $loadState)
+                        .frame(width: AdSizeBanner.size.width, height: AdSizeBanner.size.height)
+                        .frame(maxWidth: .infinity)
+                        .opacity(loadState.isVisible ? 1 : 0)
+                }
+                Color.clear
+                    .allowsHitTesting(false)
+                    .onAppear { availableWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, width in
+                        availableWidth = width
+                        if width < AdSizeBanner.size.width { loadState = .loading }
+                    }
+            }
+            .frame(height: availableWidth >= AdSizeBanner.size.width ? loadState.visibleHeight : 0)
             .clipped()
-            .accessibilityHidden(!loadState.isVisible)
-            .animation(.easeOut(duration: 0.2), value: loadState.visibleHeight)
+            .accessibilityHidden(!(loadState.isVisible) || availableWidth < AdSizeBanner.size.width)
+            .padding(.top, loadState.isVisible && availableWidth >= AdSizeBanner.size.width ? 8 : 0)
         }
     }
 }
@@ -36,7 +46,7 @@ private enum AdMobBannerLoadState: Equatable {
     var visibleHeight: CGFloat {
         switch self {
         case .loading:
-            return 1
+            return 0
         case .loaded(let height):
             return max(height, 1)
         case .failed:
@@ -145,7 +155,7 @@ private final class AdMobBannerViewController: UIViewController, BannerViewDeleg
 
     private func requestBannerIfNeeded() {
         let width = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width
-        guard width > 0 else { return }
+        guard width >= AdSizeBanner.size.width else { return }
 
         if requestedAdUnitID == adUnitID,
            let requestedWidth,
@@ -157,7 +167,7 @@ private final class AdMobBannerViewController: UIViewController, BannerViewDeleg
         requestedWidth = width
         requestTimedOut = false
 
-        let adSize = largeAnchoredAdaptiveBanner(width: width)
+        let adSize = AdSizeBanner
         bannerView.adUnitID = adUnitID
         bannerView.adSize = adSize
         bannerView.load(Request())

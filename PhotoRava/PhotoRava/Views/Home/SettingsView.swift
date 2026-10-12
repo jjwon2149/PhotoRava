@@ -62,6 +62,10 @@ struct SettingsView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                RouteListAdBannerView()
+                    .background(Color(.systemGroupedBackground))
+            }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
