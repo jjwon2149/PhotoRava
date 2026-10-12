@@ -24,7 +24,7 @@
 ## UI 변경 규칙
 
 - 한국어 텍스트 줄바꿈, Dynamic Type, 작은 iPhone 화면을 확인한다.
-- 광고는 RouteList/home banner만 허용한다. interstitial/rewarded/app-open/native/full-screen은 명시 승인 전 금지다.
+- 광고는 경로 목록과 설정의 하단 safe area에 표준 320×50 banner만 허용한다(사용자 요청, 2026-10-12). 상세 지도/타임라인, 편집, EXIF, 사진 선택/분석과 권한 프롬프트에는 추가하지 않는다. interstitial/rewarded/app-open/native/full-screen은 명시 승인 전 금지다.
 - 핵심 작업 흐름인 사진 선택, 분석, EXIF 저장/공유 위에 광고나 sheet가 끼어들지 않게 한다.
 - 권한/공개 문구 화면 변경은 Info.plist와 privacy/support 문서를 같이 확인한다.
 

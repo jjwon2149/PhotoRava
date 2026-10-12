@@ -88,3 +88,9 @@ When testing route analysis or EXIF export, allow photo read/write and location 
 
 - [Privacy Policy](PhotoRava/PhotoRava/privacy-policy.md)
 - [Support](PhotoRava/PhotoRava/support.md)
+
+## Banner placement (2026-10-12)
+
+Route list and Settings only. EXIF, route map/timeline detail, edit, photo selection/analysis, and permission prompts remain ad-free. Each allowed screen owns one standard SDK 320×50 banner in its bottom safe-area inset above the tab bar; no root TabView banner. Center within the available safe-area width; omit the banner below 320pt rather than scale or crop it. Loading, no-fill and failure leave no slot or gap. A visible banner has an 8pt separator from content. Preserve existing consent, configuration and request guards.
+
+QA: use test ads or a request-free layout mock. Check 320pt/375pt/wide and landscape widths, tab switching, scrolling, detail navigation and sheets, loading/failure/no-ad states, and large text. Do not click live ads.
